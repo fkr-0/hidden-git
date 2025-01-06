@@ -1,0 +1,6 @@
+
+# Define the hidden service directory where all necessary configuration and keys will be stored
+HiddenServiceDir /var/lib/tor/hidden_service/
+
+# Link the hidden service to the private service (soft-serve) using Docker's DNS and ports
+HiddenServicePort 800 soft-serve:23231

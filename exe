@@ -1,0 +1,88 @@
+#!/bin/bash
+
+parse_funs() {
+  grep -oP "(?<=^exe_)\w+" "$0"
+}
+
+show_menu() {
+  local options=("$@")
+  local PS3="Choose a function to execute: "
+
+  select opt in "${options[@]}"; do
+    if [[ "${options[*]}" =~ (^|[[:space:]])"$opt"($|[[:space:]]) ]]; then
+      echo "Executing $opt..."
+      # remove color codes
+      opt=$(echo "$opt" | sed -r 's/\x1B\[[0-9;]*[JKmsu]//g')
+      exe_$opt
+      break
+    else
+      echo "Invalid option, please try again."
+    fi
+  done
+}
+
+parse_docstring() {
+  # grep -oP "(?<=^# )[^\n]+"
+  echo "$(grep -A2 -P "^exe_$1[ \(]" "$0" | tail -n2 | head -n1)"
+}
+
+exe_example_function() {
+  # swib slibbles
+  # $1 - The first argument
+  echo "Hello, $1!"
+}
+
+exe_example_function2() {
+  # This is another example function
+  # $1 - The test value
+  echo "The test value is: $1"
+}
+
+exe_start() {
+  # Starts the HiddenGit services
+  ./run.sh start
+}
+
+exe_stop() {
+  # Stops the HiddenGit services
+  ./run.sh stop
+}
+
+exe_build() {
+  # Builds the HiddenGit services
+  ./run.sh build
+}
+
+exe_logs() {
+  # Shows the logs of the HiddenGit services
+  ./run.sh logs
+}
+
+if [[ $# -eq 0 ]]; then
+  funs=($(parse_funs))
+  funs_docstrings=()
+  for fun in "${funs[@]}"; do
+    funs_docstrings+=("$(echo -e "\e[92m$fun\e[0m") - $(parse_docstring "$fun")")
+  done
+  show_menu "${funs_docstrings[@]}"
+else
+  command="exe_$1"
+  if type "$command" &>/dev/null; then
+    shift
+    "$command" "$@"
+  else
+    echo "Unknown function: $1"
+    exit 1
+  fi
+fi
+run_tests() {
+  source "./tests.bash"
+  test_parse_docstring_no_docstring
+  test_show_menu_invalid_option
+  test_unknown_function
+  test_show_menu
+  test_parse_funs
+  test_parse_docstring_two
+  test_show_menu_two
+}
+# run_tests
