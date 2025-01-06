@@ -1,0 +1,10 @@
+tor-client:
+  build:
+    context: .
+    dockerfile: Dockerfile.tor-client
+  ports:
+    - 9052:9050
+  expose:
+    - 9052
+  networks:
+    - soft-serve-net

@@ -1,0 +1,46 @@
+services:
+  soft-serve:
+    build:
+      context: .
+      dockerfile: Dockerfile.soft-serve
+    container_name: soft-serve
+    volumes:
+      - ./soft-serve-data:/soft-serve
+      - ./ssoft-serve-data:/var/lib/soft-serve
+    ports:
+      - 23231:23231
+      - 23232:23232
+      - 23233:23233
+      - 9418:9418
+    expose:
+      - "23231"
+    networks:
+      - soft-serve-net
+    restart: unless-stopped
+
+  tor:
+    build:
+      context: .
+      dockerfile: Dockerfile.tor
+    volumes:
+      - ./soft-serve-hidden-service.torrc:/etc/tor/torrc:ro
+      - ./tor-data/:/var/lib/tor/
+    networks:
+      - soft-serve-net
+    depends_on:
+      - soft-serve
+
+  tor-client:
+    build:
+      context: .
+      dockerfile: Dockerfile.tor-client
+    ports:
+      - 9052:9050
+    expose:
+      - 9052
+    networks:
+      - soft-serve-net
+
+networks:
+  soft-serve-net:
+    driver: bridge

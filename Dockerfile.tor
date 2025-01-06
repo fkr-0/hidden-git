@@ -1,0 +1,14 @@
+
+FROM	debian:buster-slim
+WORKDIR	/app
+RUN	apt-get update && apt-get install -y \
+	dirmngr \
+	gpg \
+	curl \
+	tor \
+	apt-transport-https \
+	--no-install-recommends \
+	&& rm -rf /var/lib/apt/lists/*
+VOLUME	/etc/tor
+COPY ./soft-serve-hidden-service.torrc /etc/tor/torrc
+CMD	["tor"]

@@ -1,0 +1,76 @@
+#+TITLE: HiddenGit
+
+this is some fiddling for fun and +profit+. if you have serious requirements for your security use established
+solutions and not some random internet guys 30min concept.
+
+* Basic idea
+- we expose soft-serve container on docker net port ~23231~
+- we route traffic of on port ~800~ of the tor container to soft-serve container ~23231~
+- we use ~torify~ or ~torsocks~ to instruct ~git~/~ssh~ to do onion routing
+- we connect to the (automatically set up) hidden services url on port ~800~ and arrive at the ~git~ forge.
+  - TODO describe setup of the soft serve git forge, but its pretty self explanatory. first user is admin, auth is using
+    ssh keys, admin may grant specific operations to specific users <=> ssh (pub) keys.
+* HowTo
+- configure your remote (eg.) :: ~/repo/.git/config
+#+begin_example
+[core]
+        repositoryformatversion = 0
+        filemode = true
+        bare = false
+        logallrefupdates = true
+[user]
+        name = cbadger
+        email = cbadger@nononoma.il
+[remote "origin"]
+        url = admin@hiddengit:.soft-serve.git
+        fetch = +refs/heads/*:refs/remotes/origin/*
+[branch "main"]
+        remote = origin
+        merge = refs/heads/main
+        pushRemote = origin
+
+#+end_example
+
+- ssh-conf :: _~/.ssh/config_
+  its helpful to setup the hostname in your ~ssh~ config this allows you to access the git/ssh using:
+  ~torify -p 9055 ssh myhiddengit help~ (note that ~9050~ is where the hidden services tor service resides.)
+#+begin_example
+Host myhiddengit
+     user admin
+     Port 800
+     HostName ouxzpnods7mdjtd76dpvjmyfp24yuk46y6dcqjvy24wceiykgu7gqqqd.onion
+#+end_example
+
+#+begin_src shell
+ssh hiddengit # for tui
+ssh hiddengit help # for settings..
+#+end_src
+
+** torclient
+i added an override allowing to execute an additional torservice on eg ~9055~. TODO in some next step we want to verify
+the setup and the possibility to access the hidden service on start of the containers with the torclient doing this and
+then exiting gracefully
+
+* HiddenGit
+** Concept
+~Soft-serve~ exposes a simple git forge through ~ssh~. ~Tor~ provides ~onion routing~ and ~hidden services~ which also
+allows us skip worrying about how to expose the service to the Internet. ~Docker~ allows us to deploy independently of
+the host devices spec through the virtue of virtualization (sic!).
+
+** Setup
+#+BEGIN_SRC shell
+#+END_SRC
+** First run
+** Continuous operation
+#+begin_src shell
+dc up --build # and you should be good to go
+
+
+
+# TODO doc exe file and script
+
+#+end_src
+** Techstack
+- [[https://www.docker.com/][Docker]]
+- [[https://www.torproject.org/][The Tor Project]]
+- [[https://github.com/charmbracelet/soft-serve][charmbracelet/soft-serve]]
