@@ -1,7 +1,7 @@
 #+TITLE: HiddenGit
 
 this is some fiddling for fun and +profit+. if you have serious requirements for your security use established
-solutions and not some random internet guys 30min concept.
+solutions and not some random internet +guys+ badgers 30min concept.
 
 * Basic idea
 - we expose soft-serve container on docker net port ~23231~
