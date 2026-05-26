@@ -3,8 +3,10 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_FILE="${ROOT_DIR}/docker-compose.yml"
+COMPOSE_TOR_CHECK_OVERRIDE="${ROOT_DIR}/docker-compose.tor-check.override.yml"
 ENV_FILE="${ROOT_DIR}/.env"
 COMPOSE=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
+COMPOSE_CHECK=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" -f "${COMPOSE_TOR_CHECK_OVERRIDE}")
 
 log() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 fail() { log "ERROR: $*"; exit 1; }
@@ -44,9 +46,9 @@ wait_for_hostname() {
   return 1
 }
 
-test_onion_http() {
-  local host="$1"
-  oniux -p 0 curl --fail --silent --show-error --max-time 30 "http://${host}" >/dev/null
+run_tor_ssh_check_task() {
+  [[ -f "${COMPOSE_TOR_CHECK_OVERRIDE}" ]] || fail "tor check override file not found at ${COMPOSE_TOR_CHECK_OVERRIDE}"
+  "${COMPOSE_CHECK[@]}" run --rm tor-check
 }
 
 is_onion_ssh_connectable() {
@@ -87,24 +89,27 @@ wait_for_onion_ssh() {
   return 1
 }
 
-test_onion_ssh_banner() {
+verify_onion_ssh_connectivity() {
   local host="$1"
-  if ! is_onion_ssh_connectable "$host"; then
-    fail "onion SSH endpoint is not connectable"
+  if has_oniux; then
+    log "oniux detected; verifying SSH connectivity over onion with oniux"
+    wait_for_onion_ssh "$host" 300 || fail "timed out waiting for onion SSH connectability via oniux"
+    return 0
   fi
+
+  log "oniux not found; falling back to torified SSH connectivity check container task"
+  run_tor_ssh_check_task
 }
 
 cmd_up() {
-  has_oniux || fail "oniux is required; install it to route checks through Tor"
   log "Starting services"
   "${COMPOSE[@]}" up -d --build
   log "Services started, waiting for onion hostname"
   local host
   host="$(wait_for_hostname 180 | tr -d '\r\n')" || fail "timed out waiting for hidden service hostname"
   log "Hidden service hostname: ${host}"
-  log "Waiting until SSH is connectable through onion endpoint"
-  wait_for_onion_ssh "$host" 300 || fail "timed out waiting for onion SSH connectability"
-  log "Onion SSH endpoint is connectable"
+  verify_onion_ssh_connectivity "$host"
+  log "Onion SSH connectivity check passed"
 }
 
 cmd_down() {
@@ -137,17 +142,11 @@ cmd_status() {
 }
 
 cmd_test() {
-  has_oniux || fail "oniux is required for test command"
   local host
   host="$(wait_for_hostname 120 | tr -d '\r\n')" || fail "timed out waiting for hidden service hostname"
   log "Hidden service hostname: ${host}"
 
-  log "Testing HTTP over oniux/Tor"
-  test_onion_http "$host"
-
-  log "Testing SSH help over onion service"
-  test_onion_ssh_banner "$host"
-
+  verify_onion_ssh_connectivity "$host"
   log "All checks passed"
 }
 
@@ -167,14 +166,13 @@ Commands:
   logs     Follow compose logs
   ps       Show service status
   status   Show service status + onion hostname if available
-  test     Verify onion hostname, HTTP reachability, and SSH access
+  test     Verify onion hostname and SSH access over hidden service via tor-check container
   restart  Restart stack
 USAGE
 }
 
 main() {
   require_cmd docker
-  require_cmd curl
   [[ -f "${ENV_FILE}" ]] || fail ".env not found at ${ENV_FILE}"
 
   local cmd="${1:-}"
