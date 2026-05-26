@@ -8,23 +8,6 @@ This is an experimental setup; for strict security requirements, prefer mature, 
 - Keep runtime reproducible via Docker and =.env= version pinning.
 - Provide operational checks through =run.sh= with =oniux=.
 
-* Architecture
-#+begin_src mermaid
-flowchart LR
-    U[User Git/SSH Client]
-    O[oniux on host]
-    T[Tor hidden service container\nHiddenServicePort ONION_PUBLIC_PORT -> soft-serve:ONION_TARGET_PORT]
-    S[soft-serve container\nSSH SOFT_SERVE_SSH_PORT]
-    SD[(named volume: soft-serve-data)]
-    TD[(named volume: tor-data)]
-
-    U --> O
-    O -->|onion routing| T
-    T --> S
-    S --> SD
-    T --> TD
-#+end_src
-
 * Ownership Notes (Bind Mounts)
 This setup uses local bind mounts:
 - =./data/soft-serve= -> soft-serve data
@@ -85,17 +68,24 @@ Commands:
 - =SOFT_SERVE_SSH_USER= :: SSH username used by readiness checks in =run.sh= (default recommended: =admin=).
 
 * Tips / Tricks
+
+If you do not use ~oniux~, connect to ~tor~ network as you do usually and replace ~oniux~ with ~torsocks~/~torify~ accordingly:
+
 ** 1) Example ~/.ssh/config
 #+begin_src sshconfig
 Host hiddengit
-  HostName ouxzpnorrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrqqd.onion
-  User admin
-  Port 800
+  HostName <ONIONADDRESS.onion>
+  User <GIT-USER>
+  Port <PORT>
   ProxyCommand oniux nc %h %p
   StrictHostKeyChecking accept-new
 #+end_src
 
 Note: if your OpenSSH build does not include =nc=, install netcat and keep the same ProxyCommand pattern.
+
+#+begin_src sh
+ssh hiddengit # connect to softserve tui
+#+end_src
 
 ** 2) Example .git/config using oniux
 #+begin_src ini
@@ -107,11 +97,15 @@ Note: if your OpenSSH build does not include =nc=, install netcat and keep the s
 	sshCommand = oniux ssh -p<PORT>
 
 [remote "origin"]
-	url = ssh://admin@ouxzpnorrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrqqd.onion/<REPONAME>.git
+	url = ssh://<GIT-USER>@<ONIONADDRESS.onion>/<REPONAME>.git
 	fetch = +refs/heads/*:refs/remotes/origin/*
 #+end_src
 
-Replace =<PORT>= with your onion public port (default from =.env=: =800=).
+#+begin_src sh
+git pull # with cwd in above git repo should work
+#+end_src
+
+Replace =<ONIONADDRESS.onion>/<REPONAME>/<GIT-USER>/<PORT>= with the relevant actual values.
 
 * Project File Map
 - =docker-compose.yml= :: Main stack (soft-serve + tor hidden service).
