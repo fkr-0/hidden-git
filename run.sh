@@ -132,12 +132,18 @@ cmd_ps() {
 
 cmd_status() {
   cmd_ps
-  local host
+  local host onion_port
   host="$(tor_hostname | tr -d '\r\n')"
+  onion_port="$(read_env_value ONION_PUBLIC_PORT)"
   if [[ -n "$host" ]]; then
     log "Hidden service hostname: ${host}"
   else
     log "Hidden service hostname not available yet"
+  fi
+  if [[ -n "$onion_port" ]]; then
+    log "Onion public SSH port: ${onion_port}"
+  else
+    log "Onion public SSH port not set in .env"
   fi
 }
 
@@ -165,7 +171,7 @@ Commands:
   build    Build images
   logs     Follow compose logs
   ps       Show service status
-  status   Show service status + onion hostname if available
+  status   Show service status + onion hostname + onion public SSH port
   test     Verify onion hostname and SSH access over hidden service via tor-check container
   restart  Restart stack
 USAGE

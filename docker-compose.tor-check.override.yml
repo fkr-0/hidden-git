@@ -10,19 +10,21 @@ services:
       SOFT_SERVE_SSH_USER: ${SOFT_SERVE_SSH_USER}
     volumes:
       - ./data/tor:/var/lib/tor:ro
-    entrypoint: ["/bin/sh", "-ec"]
-    command: |
-      apt-get update >/dev/null
-      apt-get install -y --no-install-recommends torsocks openssh-client >/dev/null
-      while :; do
-        host="$$(cat /var/lib/tor/hidden_service/hostname 2>/dev/null || true)"
-        if [ -z "$$host" ]; then
-          sleep 3
-          continue
-        fi
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        apt-get update >/dev/null
+        apt-get install -y --no-install-recommends torsocks openssh-client >/dev/null
+        while :; do
+          host="$$(cat /var/lib/tor/hidden_service/hostname 2>/dev/null || true)"
+          if [ -z "$$host" ]; then
+            sleep 3
+            continue
+          fi
 
-        out="$$(torsocks ssh -o ConnectTimeout=12 -o StrictHostKeyChecking=accept-new -o BatchMode=yes -p "$${ONION_PUBLIC_PORT}" "$${SOFT_SERVE_SSH_USER:-admin}@$$host" help 2>&1 || true)"
-        echo "$$out" | grep -Eq "Permission denied|Connection closed|help|Usage" && exit 0
-        sleep 3
-      done
+          out="$$(torsocks ssh -o ConnectTimeout=12 -o StrictHostKeyChecking=accept-new -o BatchMode=yes -p "$${ONION_PUBLIC_PORT}" "$${SOFT_SERVE_SSH_USER:-admin}@$$host" help 2>&1 || true)"
+          echo "$$out" | grep -Eq "Permission denied|Connection closed|help|Usage" && exit 0
+          sleep 3
+        done
     profiles: ["check"]
