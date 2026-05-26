@@ -1,5 +1,5 @@
-ARG GO_IMAGE=golang:1.24-bookworm
-ARG DEBIAN_IMAGE=debian:bookworm-slim
+ARG GO_IMAGE=golang:1.26.3-bookworm
+ARG DEBIAN_IMAGE=debian:trixie-slim
 
 FROM ${GO_IMAGE} AS builder
 ARG SOFT_SERVE_VERSION=v0.11.6

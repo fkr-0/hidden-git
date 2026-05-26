@@ -14,7 +14,7 @@ services:
       SOFT_SERVE_INITIAL_ADMIN_KEYS: ${SOFT_SERVE_INITIAL_ADMIN_KEYS}
       CI: ${CI}
     volumes:
-      - ./soft-serve-data:${SOFT_SERVE_DATA_PATH}
+      - ./data/soft-serve:${SOFT_SERVE_DATA_PATH}
     ports:
       - ${SOFT_SERVE_SSH_PORT}:${SOFT_SERVE_SSH_PORT}
       - ${SOFT_SERVE_HTTP_PORT}:${SOFT_SERVE_HTTP_PORT}
@@ -33,9 +33,11 @@ services:
       dockerfile: Dockerfile.tor
       args:
         DEBIAN_IMAGE: ${DEBIAN_IMAGE}
+    environment:
+      ONION_PUBLIC_PORT: ${ONION_PUBLIC_PORT}
+      ONION_TARGET_PORT: ${ONION_TARGET_PORT}
     volumes:
-      - ./soft-serve-hidden-service.torrc:/etc/tor/torrc:ro
-      - ./tor-data:/var/lib/tor
+      - ./data/tor:/var/lib/tor
     healthcheck:
       test: ["CMD", "tor", "--verify-config", "-f", "/etc/tor/torrc"]
       interval: 30s
@@ -45,20 +47,6 @@ services:
       - soft-serve-net
     depends_on:
       - soft-serve
-
-  tor-client:
-    env_file: .env
-    build:
-      context: .
-      dockerfile: Dockerfile.tor-client
-      args:
-        DEBIAN_IMAGE: ${DEBIAN_IMAGE}
-    ports:
-      - ${TOR_CLIENT_SOCKS_PORT}:9050
-    expose:
-      - "9050"
-    networks:
-      - soft-serve-net
 
 networks:
   soft-serve-net:

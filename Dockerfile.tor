@@ -1,11 +1,11 @@
-ARG DEBIAN_IMAGE=debian:bookworm-slim
+ARG DEBIAN_IMAGE=debian:trixie-slim
 FROM ${DEBIAN_IMAGE}
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates tor tini && \
+    apt-get install -y --no-install-recommends ca-certificates tor tini gettext-base && \
     rm -rf /var/lib/apt/lists/*
 
-COPY ./soft-serve-hidden-service.torrc /etc/tor/torrc
+COPY ./soft-serve-hidden-service.torrc.template /etc/tor/torrc.template
 VOLUME ["/var/lib/tor"]
 
-ENTRYPOINT ["/usr/bin/tini", "--", "tor", "-f", "/etc/tor/torrc"]
+ENTRYPOINT ["/usr/bin/tini", "--", "sh", "-ec", "envsubst < /etc/tor/torrc.template > /etc/tor/torrc && exec tor -f /etc/tor/torrc"]

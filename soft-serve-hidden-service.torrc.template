@@ -1,0 +1,5 @@
+# Hidden service identity and hostname are persisted under /var/lib/tor.
+HiddenServiceDir /var/lib/tor/hidden_service/
+
+# Public onion port -> internal soft-serve SSH endpoint.
+HiddenServicePort ${ONION_PUBLIC_PORT} soft-serve:${ONION_TARGET_PORT}

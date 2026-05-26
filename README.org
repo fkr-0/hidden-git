@@ -1,76 +1,127 @@
 #+TITLE: HiddenGit
 
-this is some fiddling for fun and +profit+. if you have serious requirements for your security use established
-solutions and not some random internet +guys+ badgers 30min concept.
+HiddenGit is a self-hosted =soft-serve= Git forge published as a Tor onion service.
+This is an experimental setup; for strict security requirements, prefer mature, audited deployments.
 
-* Basic idea
-- we expose soft-serve container on docker net port ~23231~
-- we route traffic of on port ~800~ of the tor container to soft-serve container ~23231~
-- we use ~torify~ or ~torsocks~ to instruct ~git~/~ssh~ to do onion routing
-- we connect to the (automatically set up) hidden services url on port ~800~ and arrive at the ~git~ forge.
-  - TODO describe setup of the soft serve git forge, but its pretty self explanatory. first user is admin, auth is using
-    ssh keys, admin may grant specific operations to specific users <=> ssh (pub) keys.
-* HowTo
-- configure your remote (eg.) :: ~/repo/.git/config
-#+begin_example
+* Goals
+- Expose Git-over-SSH through an onion address.
+- Keep runtime reproducible via Docker and =.env= version pinning.
+- Provide operational checks through =run.sh= with =oniux=.
+
+* Architecture
+#+begin_src mermaid
+flowchart LR
+    U[User Git/SSH Client]
+    O[oniux on host]
+    T[Tor hidden service container\nHiddenServicePort ONION_PUBLIC_PORT -> soft-serve:ONION_TARGET_PORT]
+    S[soft-serve container\nSSH SOFT_SERVE_SSH_PORT]
+    SD[(named volume: soft-serve-data)]
+    TD[(named volume: tor-data)]
+
+    U --> O
+    O -->|onion routing| T
+    T --> S
+    S --> SD
+    T --> TD
+#+end_src
+
+* Ownership Notes (Bind Mounts)
+This setup uses local bind mounts:
+- =./data/soft-serve= -> soft-serve data
+- =./data/tor= -> tor hidden-service state
+
+Because Tor and some setup steps run as root in containers, host files under =./data= can become root-owned.
+Practical mitigation options:
+- Pre-create directories and chown to your user before first run.
+- Run =sudo chown -R \"$USER\":\"$USER\" data/= after teardown if ownership drifts.
+- Keep all bind-mounted state isolated under =./data= to avoid polluting repo root.
+
+* Quick Start
+#+begin_src shell
+./run.sh up
+./run.sh status
+./run.sh test
+#+end_src
+
+Stop stack:
+#+begin_src shell
+./run.sh down
+#+end_src
+
+Run one-shot onion SSH connectivity probe via tor network namespace:
+#+begin_src shell
+docker compose --env-file .env -f docker-compose.yml -f docker-compose.tor-check.override.yml run --rm tor-check
+#+end_src
+
+* run.sh CLI Reference
+Usage:
+#+begin_src shell
+./run.sh <command>
+#+end_src
+
+Commands:
+- =up= :: Build/start services, then wait until the hidden-service SSH endpoint is connectable through onion routing.
+- =down= :: Stop and remove stack services.
+- =build= :: Build images only.
+- =logs= :: Follow compose logs.
+- =ps= :: Show service status.
+- =status= :: Show service status and onion hostname (if available).
+- =test= :: Validate HTTP and SSH onion connectivity using =oniux=.
+- =restart= :: Stop then start again.
+
+* Env Configuration (All Settings)
+- =DEBIAN_IMAGE= :: Runtime base image for Tor + soft-serve runtime stage.
+- =GO_IMAGE= :: Build image for compiling soft-serve binary.
+- =SOFT_SERVE_VERSION= :: Soft Serve version to install.
+- =SOFT_SERVE_SSH_PORT= :: soft-serve SSH port.
+- =SOFT_SERVE_HTTP_PORT= :: soft-serve HTTP port.
+- =SOFT_SERVE_STATS_PORT= :: soft-serve metrics/stats port.
+- =SOFT_SERVE_GIT_PORT= :: Git protocol port.
+- =ONION_PUBLIC_PORT= :: Onion-side exposed port.
+- =ONION_TARGET_PORT= :: Internal target port on soft-serve (usually SSH port).
+- =SOFT_SERVE_DATA_PATH= :: Data path inside soft-serve container.
+- =SOFT_SERVE_INITIAL_ADMIN_KEYS= :: Optional admin pubkeys for first boot.
+- =CI= :: Set to =1= by default; keeps runtime in non-interactive mode and avoids TTY-related sluggish behavior in containerized execution.
+- =SOFT_SERVE_SSH_USER= :: SSH username used by readiness checks in =run.sh= (default recommended: =admin=).
+
+* Tips / Tricks
+** 1) Example ~/.ssh/config
+#+begin_src sshconfig
+Host hiddengit
+  HostName ouxzpnorrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrqqd.onion
+  User admin
+  Port 800
+  ProxyCommand oniux nc %h %p
+  StrictHostKeyChecking accept-new
+#+end_src
+
+Note: if your OpenSSH build does not include =nc=, install netcat and keep the same ProxyCommand pattern.
+
+** 2) Example .git/config using oniux
+#+begin_src ini
 [core]
-        repositoryformatversion = 0
-        filemode = true
-        bare = false
-        logallrefupdates = true
-[user]
-        name = cbadger
-        email = cbadger@nononoma.il
+	repositoryformatversion = 0
+	filemode = true
+	bare = false
+	logallrefupdates = true
+	sshCommand = oniux ssh -p<PORT>
+
 [remote "origin"]
-        url = admin@hiddengit:.soft-serve.git
-        fetch = +refs/heads/*:refs/remotes/origin/*
-[branch "main"]
-        remote = origin
-        merge = refs/heads/main
-        pushRemote = origin
-
-#+end_example
-
-- ssh-conf :: _~/.ssh/config_
-  its helpful to setup the hostname in your ~ssh~ config this allows you to access the git/ssh using:
-  ~torify -p 9055 ssh myhiddengit help~ (note that ~9050~ is where the hidden services tor service resides.)
-#+begin_example
-Host myhiddengit
-     user admin
-     Port 800
-     HostName ouxzpnods7mdjtd76dpvjmyfp24yuk46y6dcqjvy24wceiykgu7gqqqd.onion
-#+end_example
-
-#+begin_src shell
-ssh hiddengit # for tui
-ssh hiddengit help # for settings..
+	url = ssh://admin@ouxzpnorrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrqqd.onion/<REPONAME>.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
 #+end_src
 
-** torclient
-i added an override allowing to execute an additional torservice on eg ~9055~. TODO in some next step we want to verify
-the setup and the possibility to access the hidden service on start of the containers with the torclient doing this and
-then exiting gracefully
+Replace =<PORT>= with your onion public port (default from =.env=: =800=).
 
-* HiddenGit
-** Concept
-~Soft-serve~ exposes a simple git forge through ~ssh~. ~Tor~ provides ~onion routing~ and ~hidden services~ which also
-allows us skip worrying about how to expose the service to the Internet. ~Docker~ allows us to deploy independently of
-the host devices spec through the virtue of virtualization (sic!).
+* Project File Map
+- =docker-compose.yml= :: Main stack (soft-serve + tor hidden service).
+- =docker-compose.tor-check.override.yml= :: Optional one-shot torsocks SSH checker that joins tor container network namespace.
+- =Dockerfile.soft-serve= :: Build soft-serve binary and package runtime.
+- =Dockerfile.tor= :: Tor hidden-service runtime, renders torrc from template.
+- =soft-serve-hidden-service.torrc.template= :: Tor config template with env substitution.
+- =run.sh= :: Operator entrypoint for build/start/status/test.
 
-** Setup
-#+BEGIN_SRC shell
-#+END_SRC
-** First run
-** Continuous operation
-#+begin_src shell
-dc up --build # and you should be good to go
-
-
-
-# TODO doc exe file and script
-
-#+end_src
-** Techstack
+* Running on
 - [[https://www.docker.com/][Docker]]
 - [[https://www.torproject.org/][The Tor Project]]
 - [[https://github.com/charmbracelet/soft-serve][charmbracelet/soft-serve]]
