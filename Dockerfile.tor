@@ -1,14 +1,11 @@
+ARG DEBIAN_IMAGE=debian:bookworm-slim
+FROM ${DEBIAN_IMAGE}
 
-FROM	debian:buster-slim
-WORKDIR	/app
-RUN	apt-get update && apt-get install -y \
-	dirmngr \
-	gpg \
-	curl \
-	tor \
-	apt-transport-https \
-	--no-install-recommends \
-	&& rm -rf /var/lib/apt/lists/*
-VOLUME	/etc/tor
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates tor tini && \
+    rm -rf /var/lib/apt/lists/*
+
 COPY ./soft-serve-hidden-service.torrc /etc/tor/torrc
-CMD	["tor"]
+VOLUME ["/var/lib/tor"]
+
+ENTRYPOINT ["/usr/bin/tini", "--", "tor", "-f", "/etc/tor/torrc"]

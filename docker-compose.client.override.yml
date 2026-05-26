@@ -1,10 +1,14 @@
-tor-client:
-  build:
-    context: .
-    dockerfile: Dockerfile.tor-client
-  ports:
-    - 9052:9050
-  expose:
-    - 9052
-  networks:
-    - soft-serve-net
+services:
+  tor-client:
+    env_file: .env
+    build:
+      context: .
+      dockerfile: Dockerfile.tor-client
+      args:
+        DEBIAN_IMAGE: ${DEBIAN_IMAGE}
+    ports:
+      - ${TOR_CLIENT_SOCKS_PORT}:9050
+    expose:
+      - "9050"
+    networks:
+      - soft-serve-net

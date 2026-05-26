@@ -1,43 +1,62 @@
 services:
   soft-serve:
+    env_file: .env
     build:
       context: .
       dockerfile: Dockerfile.soft-serve
+      args:
+        GO_IMAGE: ${GO_IMAGE}
+        DEBIAN_IMAGE: ${DEBIAN_IMAGE}
+        SOFT_SERVE_VERSION: ${SOFT_SERVE_VERSION}
     container_name: soft-serve
+    environment:
+      SOFT_SERVE_DATA_PATH: ${SOFT_SERVE_DATA_PATH}
+      SOFT_SERVE_INITIAL_ADMIN_KEYS: ${SOFT_SERVE_INITIAL_ADMIN_KEYS}
+      CI: ${CI}
     volumes:
-      - ./soft-serve-data:/soft-serve
-      - ./ssoft-serve-data:/var/lib/soft-serve
+      - ./soft-serve-data:${SOFT_SERVE_DATA_PATH}
     ports:
-      - 23231:23231
-      - 23232:23232
-      - 23233:23233
-      - 9418:9418
+      - ${SOFT_SERVE_SSH_PORT}:${SOFT_SERVE_SSH_PORT}
+      - ${SOFT_SERVE_HTTP_PORT}:${SOFT_SERVE_HTTP_PORT}
+      - ${SOFT_SERVE_STATS_PORT}:${SOFT_SERVE_STATS_PORT}
+      - ${SOFT_SERVE_GIT_PORT}:${SOFT_SERVE_GIT_PORT}
     expose:
-      - "23231"
+      - "${SOFT_SERVE_SSH_PORT}"
     networks:
       - soft-serve-net
     restart: unless-stopped
 
   tor:
+    env_file: .env
     build:
       context: .
       dockerfile: Dockerfile.tor
+      args:
+        DEBIAN_IMAGE: ${DEBIAN_IMAGE}
     volumes:
       - ./soft-serve-hidden-service.torrc:/etc/tor/torrc:ro
-      - ./tor-data/:/var/lib/tor/
+      - ./tor-data:/var/lib/tor
+    healthcheck:
+      test: ["CMD", "tor", "--verify-config", "-f", "/etc/tor/torrc"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
     networks:
       - soft-serve-net
     depends_on:
       - soft-serve
 
   tor-client:
+    env_file: .env
     build:
       context: .
       dockerfile: Dockerfile.tor-client
+      args:
+        DEBIAN_IMAGE: ${DEBIAN_IMAGE}
     ports:
-      - 9052:9050
+      - ${TOR_CLIENT_SOCKS_PORT}:9050
     expose:
-      - 9052
+      - "9050"
     networks:
       - soft-serve-net
 

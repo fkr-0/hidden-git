@@ -1,9 +1,9 @@
-FROM debian:buster-slim
+ARG DEBIAN_IMAGE=debian:bookworm-slim
+FROM ${DEBIAN_IMAGE}
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    tor \
-    torsocks \
-    openssh-client \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends tor torsocks openssh-client ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
 
-CMD tor & sleep infinity
+# Standalone SOCKS endpoint for host tooling.
+CMD ["tor", "--RunAsDaemon", "0", "--SocksPort", "0.0.0.0:9050"]
