@@ -3,10 +3,15 @@ FROM ${DEBIAN_IMAGE}
 
 RUN DEBIAN_FRONTEND=noninteractive apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates tor tini gettext-base && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    printf 'hidden-tor:x:10002:\n' >> /etc/group && \
+    printf 'hidden-tor:x:10002:10002:HiddenGit Tor service:/var/lib/tor:/usr/sbin/nologin\n' >> /etc/passwd && \
+    install -d -o 10002 -g 10002 -m 0700 /var/lib/tor /run/hidden-git
 
 COPY ./soft-serve-hidden-service.torrc.template /etc/tor/torrc.template
 COPY --chmod=0755 scripts/tor-entrypoint.sh /usr/local/bin/hidden-git-tor-entrypoint
+COPY --chmod=0755 scripts/tor-healthcheck.sh /usr/local/bin/hidden-git-tor-healthcheck
 VOLUME ["/var/lib/tor"]
+USER 10002:10002
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/hidden-git-tor-entrypoint"]

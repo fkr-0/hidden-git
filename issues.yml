@@ -7,7 +7,7 @@ updated_at: 2026-07-18
 issues:
   - id: HG-001
     title: Run both service containers as dedicated non-root users
-    status: open
+    status: in_progress
     priority: high
     area: security
     reason_deferred: >-
@@ -19,10 +19,17 @@ issues:
       - Document stable UID/GID assignments.
       - Provide an idempotent ownership migration command.
       - Verify fresh and upgraded deployments with rootless Docker or Podman.
+    progress:
+      - Doctor reports daemon and container-user posture with remediation.
+      - An idempotent permission repair command protects current bind mounts.
+      - Stable UIDs 10001 and 10002 and an idempotent ownership migration are implemented.
+      - Services run non-root with read-only roots, dropped capabilities, and no-new-privileges.
+      - Fresh and upgraded disposable deployments are covered by integration tests.
+      - Rootless Docker or Podman compatibility verification remains open.
 
   - id: HG-002
     title: Add encrypted backup, restore, and onion identity rotation workflows
-    status: open
+    status: closed
     priority: high
     area: operations
     reason_deferred: >-
@@ -33,6 +40,86 @@ issues:
       - Produce encrypted, integrity-checked backups.
       - Test restore into an empty deployment.
       - Support explicit preserve-identity and rotate-identity modes.
+    resolution: >-
+      Added a pinned maintenance image with age encryption, authenticated
+      archives, internal per-file SHA-256 verification, stopped-stack safety,
+      empty-target restores, and explicit preserve or rotate onion identity
+      modes. A containerized regression test exercises both restore paths.
+    closed_at: 2026-07-18
+
+  - id: HG-008
+    title: Reduce and continuously triage high and critical image vulnerabilities
+    status: open
+    priority: high
+    area: security
+    evidence:
+      observed_at: 2026-07-18
+      scanner: trivy-0.72.0
+      policy: fail-on-fixable-high-or-critical
+      images:
+        soft-serve:
+          critical: 12
+          high: 43
+          fixable_high_or_critical: 0
+        tor:
+          critical: 3
+          high: 18
+          fixable_high_or_critical: 0
+        tor-check:
+          critical: 4
+          high: 20
+          fixable_high_or_critical: 0
+        maintenance:
+          critical: 3
+          high: 18
+          fixable_high_or_critical: 0
+    reason_deferred: >-
+      The first complete evidence pass found no remaining high or critical
+      finding with an advertised fixed version after applying explicit Soft
+      Serve dependency overrides and removing the unused OpenSSH client. The
+      remaining findings are currently unfixed distro or embedded dependency
+      advisories. Their exposure and package necessity still require explicit
+      per-image review and image-minimization work.
+    acceptance_criteria:
+      - Generate and review evidence for every release image.
+      - Fail release evidence when a high or critical fixed version is available.
+      - Document exploitability and compensating controls for unfixed findings.
+      - Remove unnecessary packages or replace the base where materially safer.
+      - Close or explicitly accept each remaining critical finding.
+    progress:
+      - The evidence pipeline records all findings and gates fixable high or critical issues.
+      - Strict mode can reject any high or critical finding for hardened releases.
+      - Sixteen fixable Soft Serve dependency findings were remediated downstream.
+      - The unused OpenSSH client was removed from the Soft Serve runtime image.
+      - The current four-image baseline has zero fixable high or critical findings.
+
+  - id: HG-009
+    title: Reconcile distinct current and legacy deployment state directories
+    status: open
+    priority: high
+    area: operations
+    evidence:
+      observed_at: 2026-07-18
+      current_layout: data/
+      legacy_layouts:
+        - soft-serve-data/
+        - tor-data/
+      distinct_database: true
+      distinct_ssh_host_identity: true
+      distinct_onion_identity: true
+    reason_deferred: >-
+      The checkout contains two distinct deployments rather than duplicate
+      directories. Automatically selecting, merging, or deleting either state
+      could lose repositories or permanently change an onion address. A safe
+      resolution requires operator intent and verified backups of both states.
+    acceptance_criteria:
+      - Create and restore-test encrypted backups of both deployment layouts.
+      - Decide which database and onion identity is authoritative.
+      - Export or migrate repositories that exist only in the non-authoritative state.
+      - Archive or securely remove the retired deployment after verification.
+    progress:
+      - Doctor warns when both layouts coexist.
+      - A secret-safe legacy-state command reports counts, recency, and equality only.
 
   - id: HG-003
     title: Support Tor v3 client authorization
@@ -69,7 +156,7 @@ issues:
 
   - id: HG-005
     title: Pin base images by digest and automate dependency update review
-    status: in_progress
+    status: closed
     priority: medium
     area: supply-chain
     reason_deferred: >-
@@ -82,7 +169,13 @@ issues:
     progress:
       - Debian and Go release image references are pinned by OCI index digest.
       - Dependabot is configured for Docker and GitHub Actions updates.
-      - Release provenance and vulnerability scan artifacts remain open.
+      - Release provenance and vulnerability scan artifacts are generated for tags.
+    resolution: >-
+      Added digest-pinned base and scanner images, immutable GitHub Action
+      references, automated dependency proposals, SLSA v1 provenance extraction,
+      CycloneDX SBOM generation, and vulnerability reports uploaded for tagged
+      releases and manual evidence runs.
+    closed_at: 2026-07-18
 
   - id: HG-006
     title: Select and publish a project license
@@ -96,3 +189,20 @@ issues:
       - Record the maintainer's explicit license choice.
       - Add the canonical license text at the repository root.
       - Reference the license from the README and release metadata.
+
+  - id: HG-007
+    title: Add actionable operator UX for security best-practice violations
+    status: closed
+    priority: high
+    area: usability
+    acceptance_criteria:
+      - Distinguish invalid configuration from risky but valid choices.
+      - Give a concrete remediation for every warning.
+      - Provide strict automation mode and safe permission repair.
+      - Surface connection commands and remaining issue priorities.
+    resolution: >-
+      Doctor now emits PASS, WARN, FAIL, and INFO findings with fixes, supports
+      strict mode, and audits secret permissions, host exposure, immutable
+      dependencies, key posture, Docker isolation, and backup freshness.
+      Status and issue-summary output now provide direct operator next steps.
+    closed_at: 2026-07-18

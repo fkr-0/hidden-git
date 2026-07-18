@@ -6,6 +6,10 @@
 
 # Runtime state: contains databases, SSH keys, and Tor onion identities
 data/
+backups/
+release-evidence/
+__pycache__/
+*.pyc
 soft-serve-data/
 ssoft-serve-data/
 tor-data/

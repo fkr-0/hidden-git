@@ -3,17 +3,42 @@ ARG DEBIAN_IMAGE=debian:trixie-slim@sha256:020c0d20b9880058cbe785a9db107156c3c75
 
 FROM ${GO_IMAGE} AS builder
 ARG SOFT_SERVE_VERSION=v0.11.6
-RUN go install github.com/charmbracelet/soft-serve/cmd/soft@${SOFT_SERVE_VERSION}
+ARG SOFT_SERVE_WISH_VERSION=v2.0.1
+ARG SOFT_SERVE_GO_GIT_VERSION=v5.19.0
+ARG SOFT_SERVE_GO_JOSE_VERSION=v3.0.5
+ARG SOFT_SERVE_X_CRYPTO_VERSION=v0.52.0
+ARG SOFT_SERVE_X_NET_VERSION=v0.55.0
+RUN set -eux; \
+    export GOMODCACHE=/tmp/gomodcache; \
+    mkdir -p /src /out; \
+    go mod download github.com/charmbracelet/soft-serve@${SOFT_SERVE_VERSION}; \
+    cp -a "${GOMODCACHE}/github.com/charmbracelet/soft-serve@${SOFT_SERVE_VERSION}/." /src/; \
+    chmod -R u+w /src; \
+    cd /src; \
+    go get \
+      charm.land/wish/v2@${SOFT_SERVE_WISH_VERSION} \
+      github.com/go-git/go-git/v5@${SOFT_SERVE_GO_GIT_VERSION} \
+      github.com/go-jose/go-jose/v3@${SOFT_SERVE_GO_JOSE_VERSION} \
+      golang.org/x/crypto@${SOFT_SERVE_X_CRYPTO_VERSION} \
+      golang.org/x/net@${SOFT_SERVE_X_NET_VERSION}; \
+    go mod verify; \
+    go build -trimpath \
+      -ldflags "-s -w -X main.Version=${SOFT_SERVE_VERSION}" \
+      -o /out/soft ./cmd/soft
 
 FROM ${DEBIAN_IMAGE}
 
 RUN DEBIAN_FRONTEND=noninteractive apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates gettext-base git openssh-client tini && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends ca-certificates gettext-base git tini && \
+    rm -rf /var/lib/apt/lists/* && \
+    printf 'hidden-git:x:10001:\n' >> /etc/group && \
+    printf 'hidden-git:x:10001:10001:HiddenGit service:/var/lib/soft-serve:/usr/sbin/nologin\n' >> /etc/passwd && \
+    install -d -o 10001 -g 10001 -m 0700 /var/lib/soft-serve /run/hidden-git
 
-COPY --from=builder /go/bin/soft /usr/local/bin/soft
+COPY --from=builder /out/soft /usr/local/bin/soft
 COPY soft-serve.config.yaml.template /etc/hidden-git/soft-serve.config.yaml.template
 COPY --chmod=0755 scripts/soft-serve-entrypoint.sh /usr/local/bin/hidden-git-soft-serve-entrypoint
+COPY --chmod=0755 scripts/soft-serve-healthcheck.sh /usr/local/bin/hidden-git-soft-serve-healthcheck
 
 ENV SOFT_SERVE_DATA_PATH=/var/lib/soft-serve
 ENV SOFT_SERVE_NAME=HiddenGit
@@ -22,5 +47,6 @@ ENV CI=1
 
 WORKDIR /var/lib/soft-serve
 VOLUME ["/var/lib/soft-serve"]
+USER 10001:10001
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/hidden-git-soft-serve-entrypoint"]

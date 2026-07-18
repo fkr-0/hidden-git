@@ -2,6 +2,7 @@ name: hidden-git
 
 services:
   soft-serve:
+    user: "10001:10001"
     build:
       context: .
       dockerfile: Dockerfile.soft-serve
@@ -9,6 +10,11 @@ services:
         GO_IMAGE: ${GO_IMAGE}
         DEBIAN_IMAGE: ${DEBIAN_IMAGE}
         SOFT_SERVE_VERSION: ${SOFT_SERVE_VERSION}
+        SOFT_SERVE_WISH_VERSION: ${SOFT_SERVE_WISH_VERSION:-v2.0.1}
+        SOFT_SERVE_GO_GIT_VERSION: ${SOFT_SERVE_GO_GIT_VERSION:-v5.19.0}
+        SOFT_SERVE_GO_JOSE_VERSION: ${SOFT_SERVE_GO_JOSE_VERSION:-v3.0.5}
+        SOFT_SERVE_X_CRYPTO_VERSION: ${SOFT_SERVE_X_CRYPTO_VERSION:-v0.52.0}
+        SOFT_SERVE_X_NET_VERSION: ${SOFT_SERVE_X_NET_VERSION:-v0.55.0}
     environment:
       SOFT_SERVE_DATA_PATH: ${SOFT_SERVE_DATA_PATH}
       SOFT_SERVE_NAME: ${SOFT_SERVE_NAME:-HiddenGit}
@@ -23,6 +29,14 @@ services:
       CI: ${CI}
     volumes:
       - ./data/soft-serve:${SOFT_SERVE_DATA_PATH}
+    read_only: true
+    tmpfs:
+      - /run/hidden-git:uid=10001,gid=10001,mode=0700
+      - /tmp:uid=10001,gid=10001,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "${HOST_BIND_ADDRESS:-127.0.0.1}:${SOFT_SERVE_SSH_PORT}:${SOFT_SERVE_SSH_PORT}"
       - "${HOST_BIND_ADDRESS:-127.0.0.1}:${SOFT_SERVE_HTTP_PORT}:${SOFT_SERVE_HTTP_PORT}"
@@ -33,11 +47,7 @@ services:
     networks:
       - soft-serve-net
     healthcheck:
-      test:
-        - CMD-SHELL
-        - >-
-          ssh-keyscan -T 3 -p "$${SOFT_SERVE_SSH_PORT}" 127.0.0.1
-          >/dev/null 2>&1
+      test: ["CMD", "/usr/local/bin/hidden-git-soft-serve-healthcheck"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -46,6 +56,7 @@ services:
     stop_grace_period: 20s
 
   tor:
+    user: "10002:10002"
     build:
       context: .
       dockerfile: Dockerfile.tor
@@ -56,11 +67,19 @@ services:
       ONION_TARGET_PORT: ${ONION_TARGET_PORT}
     volumes:
       - ./data/tor:/var/lib/tor
+    read_only: true
+    tmpfs:
+      - /run/hidden-git:uid=10002,gid=10002,mode=0700
+      - /tmp:uid=10002,gid=10002,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
-      test: ["CMD-SHELL", "test -s /var/lib/tor/hidden_service/hostname"]
+      test: ["CMD", "/usr/local/bin/hidden-git-tor-healthcheck"]
       interval: 10s
       timeout: 5s
-      retries: 18
+      retries: 30
       start_period: 20s
     networks:
       - soft-serve-net
@@ -69,6 +88,23 @@ services:
         condition: service_healthy
     restart: unless-stopped
     stop_grace_period: 30s
+
+  maintenance:
+    profiles: ["maintenance"]
+    build:
+      context: .
+      dockerfile: Dockerfile.maintenance
+      args:
+        DEBIAN_IMAGE: ${DEBIAN_IMAGE}
+    environment:
+      OUTPUT_UID: ${OUTPUT_UID:-0}
+      OUTPUT_GID: ${OUTPUT_GID:-0}
+    volumes:
+      - ./data:/hidden-git/data
+      - ./backups:/hidden-git/backups
+    network_mode: none
+    security_opt:
+      - no-new-privileges:true
 
 networks:
   soft-serve-net:

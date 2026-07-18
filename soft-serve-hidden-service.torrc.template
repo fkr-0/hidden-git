@@ -1,5 +1,11 @@
 # Hidden service identity and hostname are persisted under /var/lib/tor.
+DataDirectory /var/lib/tor
 HiddenServiceDir /var/lib/tor/hidden_service/
+PidFile /run/hidden-git/tor.pid
+Log notice stdout
+ControlPort 127.0.0.1:9051
+CookieAuthentication 1
+CookieAuthFile /run/hidden-git/control_auth_cookie
 
 # Public onion port -> internal soft-serve SSH endpoint.
 HiddenServicePort ${ONION_PUBLIC_PORT} soft-serve:${ONION_TARGET_PORT}

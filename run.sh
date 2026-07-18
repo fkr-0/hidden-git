@@ -8,10 +8,88 @@ ENV_FILE="${HIDDEN_GIT_ENV_FILE:-${ROOT_DIR}/.env}"
 VERSION_FILE="${ROOT_DIR}/VERSION"
 COMPOSE=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
 COMPOSE_CHECK=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" -f "${COMPOSE_TOR_CHECK_OVERRIDE}")
+COMPOSE_MAINTENANCE=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" --profile maintenance)
 
 log() {
     printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
 }
+
+cmd_migrate_users() {
+    require_runtime
+    require_services_stopped
+    ensure_runtime_directories
+    local confirmation="${1:-}"
+    if runtime_contains_state && [[ "$confirmation" != '--confirm-existing' ]]; then
+        fail "existing data requires confirmation; first create and verify a backup, then run './run.sh migrate-users --confirm-existing'"
+    fi
+    OUTPUT_UID="$(id -u)" OUTPUT_GID="$(id -g)" \
+        "${COMPOSE_MAINTENANCE[@]}" run --rm --build -T maintenance migrate-users
+    runtime_ownership_ok \
+        || fail "ownership migration did not produce the expected 10001:10001 and 10002:10002 owners"
+    log "Runtime ownership migrated to the dedicated service users"
+}
+
+runtime_contains_state() {
+    OUTPUT_UID="$(id -u)" OUTPUT_GID="$(id -g)" \
+        "${COMPOSE_MAINTENANCE[@]}" run --rm --build -T maintenance has-state \
+        >/dev/null 2>&1
+}
+
+runtime_ownership_ok() {
+    [[ "$(stat -c '%u:%g' "${ROOT_DIR}/data/soft-serve" 2>/dev/null || true)" == '10001:10001' \
+        && "$(stat -c '%u:%g' "${ROOT_DIR}/data/tor" 2>/dev/null || true)" == '10002:10002' ]]
+}
+
+ensure_runtime_ownership() {
+    runtime_ownership_ok && return 0
+    if runtime_contains_state; then
+        fail "existing runtime data needs the explicit non-root migration; create an encrypted backup, then run './run.sh migrate-users --confirm-existing'"
+    fi
+    log "Fresh runtime directories need service ownership; applying the safe migration"
+    cmd_migrate_users
+}
+
+sync_env_key_from_example() {
+    local key="$1"
+    local value tmp
+    value="$(awk -F= -v wanted="$key" '$1 == wanted {sub(/^[^=]*=/, ""); print; exit}' \
+        "$ROOT_DIR/env.example")"
+    [[ -n "$value" ]] || fail "env.example has no value for $key"
+    tmp="$(mktemp)"
+    awk -v wanted="$key" -v replacement="$value" '
+        BEGIN { found = 0 }
+        $0 ~ "^" wanted "=" { print wanted "=" replacement; found = 1; next }
+        { print }
+        END { if (!found) print wanted "=" replacement }
+    ' "$ENV_FILE" > "$tmp"
+    cat "$tmp" > "$ENV_FILE"
+    rm -f "$tmp"
+}
+
+cmd_sync_pins() {
+    [[ -f "$ENV_FILE" ]] || fail "environment file not found at $ENV_FILE"
+    local backup key
+    backup="${ENV_FILE}.pre-sync-$(date -u '+%Y%m%dT%H%M%SZ')"
+    cp -p "$ENV_FILE" "$backup"
+    for key in HIDDEN_GIT_VERSION DEBIAN_IMAGE GO_IMAGE SOFT_SERVE_VERSION \
+        SOFT_SERVE_WISH_VERSION SOFT_SERVE_GO_GIT_VERSION \
+        SOFT_SERVE_GO_JOSE_VERSION SOFT_SERVE_X_CRYPTO_VERSION \
+        SOFT_SERVE_X_NET_VERSION TRIVY_IMAGE BUILDKIT_IMAGE; do
+        sync_env_key_from_example "$key"
+    done
+    chmod 600 "$ENV_FILE" "$backup"
+    log "Updated reviewed release references in $ENV_FILE"
+    log "Previous environment saved at $backup"
+}
+
+cmd_evidence() {
+    require_runtime
+    validate_environment
+    "$ROOT_DIR/scripts/release-evidence.sh" "${1:-}"
+}
+
+# shellcheck source=scripts/operator-ui.sh
+source "${ROOT_DIR}/scripts/operator-ui.sh"
 
 validate_positive_integer() {
     local name="$1"
@@ -115,8 +193,16 @@ validate_first_boot_admin() {
 }
 
 ensure_runtime_directories() {
-    mkdir -p "${ROOT_DIR}/data/soft-serve" "${ROOT_DIR}/data/tor"
-    chmod 700 "${ROOT_DIR}/data" "${ROOT_DIR}/data/soft-serve" "${ROOT_DIR}/data/tor" 2>/dev/null || true
+    mkdir -p "${ROOT_DIR}/data/soft-serve" "${ROOT_DIR}/data/tor" "${ROOT_DIR}/backups"
+    chmod 700 "${ROOT_DIR}/data" "${ROOT_DIR}/data/soft-serve" \
+        "${ROOT_DIR}/data/tor" "${ROOT_DIR}/backups" 2>/dev/null || true
+}
+
+require_services_stopped() {
+    local running
+    running="$("${COMPOSE[@]}" ps -q --status running 2>/dev/null || true)"
+    [[ -z "$running" ]] \
+        || fail "this operation requires a stopped stack; run './run.sh down' first"
 }
 
 tor_hostname() {
@@ -232,6 +318,8 @@ cmd_up() {
     validate_environment
     validate_first_boot_admin
     ensure_runtime_directories
+    cmd_doctor
+    ensure_runtime_ownership
     log "Starting services"
     "${COMPOSE[@]}" up -d --build --wait
     log "Services are healthy; waiting for onion hostname"
@@ -253,7 +341,7 @@ cmd_build() {
     require_runtime
     validate_environment
     log "Building release images"
-    "${COMPOSE_CHECK[@]}" --profile check build
+    "${COMPOSE_CHECK[@]}" --profile check --profile maintenance build
 }
 
 cmd_logs() {
@@ -269,9 +357,12 @@ cmd_ps() {
 cmd_status() {
     require_runtime
     "${COMPOSE[@]}" ps
-    local host onion_port
+    local host onion_port ssh_port ssh_user
     host="$(tor_hostname | tr -d '\r\n')"
     onion_port="$(read_env_value ONION_PUBLIC_PORT)"
+    ssh_port="$(read_env_value SOFT_SERVE_SSH_PORT)"
+    ssh_user="$(read_env_value SOFT_SERVE_SSH_USER)"
+    [[ -n "$ssh_user" ]] || ssh_user='admin'
     if [[ -n "$host" ]]; then
         log "Hidden service hostname: ${host}"
     else
@@ -281,6 +372,10 @@ cmd_status() {
         log "Onion public SSH port: ${onion_port}"
     else
         log "Onion public SSH port is not configured"
+    fi
+    [[ -z "$ssh_port" ]] || log "Local SSH: ssh -p ${ssh_port} ${ssh_user}@127.0.0.1"
+    if [[ -n "$host" && -n "$onion_port" ]]; then
+        log "Onion SSH: oniux ssh -p ${onion_port} ${ssh_user}@${host}"
     fi
 }
 
@@ -302,17 +397,121 @@ cmd_config() {
 }
 
 cmd_doctor() {
+    local strict=0
+    if [[ "${1:-}" == '--strict' ]]; then
+        strict=1
+    elif [[ -n "${1:-}" ]]; then
+        fail "doctor accepts only --strict"
+    fi
     require_runtime
     validate_environment
-    validate_first_boot_admin
     ensure_runtime_directories
     "${COMPOSE_CHECK[@]}" --profile check config >/dev/null
-    log "Configuration is valid for HiddenGit $(project_version)"
+    log "Compose configuration is valid for HiddenGit $(project_version)"
     if has_oniux; then
         log "Optional oniux client check is available"
     else
         log "oniux is not installed; containerized torsocks checks will be used"
     fi
+    run_best_practice_audit
+    ((AUDIT_FAILURES == 0)) || return 1
+    if ((strict == 1 && AUDIT_WARNINGS > 0)); then
+        log "ERROR: strict doctor mode rejects best-practice warnings" >&2
+        return 2
+    fi
+}
+
+cmd_fix_permissions() {
+    require_runtime
+    chmod 600 "$ENV_FILE"
+    OUTPUT_UID="$(id -u)" OUTPUT_GID="$(id -g)" \
+        "${COMPOSE_MAINTENANCE[@]}" run --rm --build -T maintenance permissions
+    log "Applied private permissions to .env, runtime data, and backups"
+}
+
+cmd_backup_keygen() {
+    require_runtime
+    ensure_runtime_directories
+    local target="${1:-${ROOT_DIR}/backups/backup-identity.agekey}"
+    target="$(realpath -m "$target")"
+    mkdir -p "$(dirname "$target")"
+    OUTPUT_UID="$(id -u)" OUTPUT_GID="$(id -g)" \
+        "${COMPOSE_MAINTENANCE[@]}" run --rm --build -T \
+        -v "$(dirname "$target"):/keys" \
+        maintenance keygen "/keys/$(basename "$target")"
+    log "Keep the identity file offline; configure only its public recipient in .env"
+}
+
+cmd_backup() {
+    require_runtime
+    validate_environment
+    require_services_stopped
+    ensure_runtime_directories
+    local recipient="${1:-$(read_env_value BACKUP_RECIPIENT)}"
+    [[ -n "$recipient" ]] \
+        || fail "backup recipient missing; pass one or set BACKUP_RECIPIENT in .env"
+    OUTPUT_UID="$(id -u)" OUTPUT_GID="$(id -g)" \
+        "${COMPOSE_MAINTENANCE[@]}" run --rm --build -T \
+        -e "BACKUP_RECIPIENT=${recipient}" maintenance backup
+}
+
+cmd_restore() {
+    require_runtime
+    validate_environment
+    require_services_stopped
+    ensure_runtime_directories
+    local archive="${1:-}"
+    local identity="${2:-$(read_env_value BACKUP_IDENTITY_FILE)}"
+    local mode="${3:-preserve}"
+    [[ -n "$archive" ]] || fail "usage: ./run.sh restore <archive> <identity-file> [preserve|rotate]"
+    [[ -n "$identity" ]] || fail "restore identity missing; pass its file path or set BACKUP_IDENTITY_FILE"
+    archive="$(realpath "$archive")"
+    identity="$(realpath "$identity")"
+    [[ -f "$archive" ]] || fail "backup archive not found: $archive"
+    [[ -f "$identity" ]] || fail "backup identity not found: $identity"
+    [[ -f "${archive}.sha256" ]] || fail "backup checksum sidecar not found: ${archive}.sha256"
+    [[ "$mode" == preserve || "$mode" == rotate ]] \
+        || fail "restore mode must be preserve or rotate"
+    OUTPUT_UID="$(id -u)" OUTPUT_GID="$(id -g)" \
+        "${COMPOSE_MAINTENANCE[@]}" run --rm --build -T \
+        -v "$archive:/run/backup.tar.age:ro" \
+        -v "${archive}.sha256:/run/backup.tar.age.sha256:ro" \
+        -v "$identity:/run/secrets/age-identity:ro" \
+        -e RESTORE_ARCHIVE=/run/backup.tar.age \
+        -e RESTORE_IDENTITY_FILE=/run/secrets/age-identity \
+        -e "RESTORE_MODE=${mode}" maintenance restore
+    log "Run './run.sh doctor --strict' before starting the restored deployment"
+}
+
+cmd_issues() {
+    printf 'HiddenGit issue status\n'
+    printf '%s\n' '────────────────────────────────────────────────────────────────────'
+    awk '
+        function emit() {
+            if (id != "") printf "%-8s %-12s %-8s %s\n", id, status, priority, title
+        }
+        /^  - id:/ { emit(); id=$3; title=""; status=""; priority=""; next }
+        /^    title:/ { sub(/^    title: /, ""); title=$0; next }
+        /^    status:/ { status=$2; next }
+        /^    priority:/ { priority=$2; next }
+        END { emit() }
+    ' "$ROOT_DIR/issues.yml"
+    printf '%s\n' '────────────────────────────────────────────────────────────────────'
+    printf '%s\n' 'Recommended order: HG-009 state reconciliation → HG-008 vulnerability triage → HG-001 rootless compatibility.'
+    printf '%s\n' 'HG-006 requires an explicit maintainer license decision; HG-003 is optional defense in depth.'
+}
+
+cmd_legacy_state() {
+    require_runtime
+    local image
+    image="$(read_env_value DEBIAN_IMAGE)"
+    [[ "$image" =~ @sha256:[0-9a-f]{64}$ ]] \
+        || fail "DEBIAN_IMAGE must be digest-pinned; run './run.sh sync-pins'"
+
+    docker run --rm --network none \
+        -v "$ROOT_DIR:/repo:ro" \
+        -v "$ROOT_DIR/scripts/legacy-state.sh:/usr/local/bin/hidden-git-legacy-state:ro" \
+        "$image" /usr/local/bin/hidden-git-legacy-state /repo
 }
 
 cmd_restart() {
@@ -336,7 +535,25 @@ Commands:
   status    Show service status, onion hostname, and public SSH port
   test      Verify live onion SSH access
   config    Render the fully interpolated Compose configuration
-  doctor    Validate local prerequisites and configuration
+  doctor    Validate configuration and show actionable best-practice findings
+  doctor --strict
+            Fail when any best-practice warning remains
+  fix-permissions
+            Restrict .env, runtime data, and backup directory permissions
+  sync-pins Update reviewed version and digest references without changing local ports
+  migrate-users [--confirm-existing]
+            Assign stable service UIDs; confirmation and a backup are required for existing data
+  backup-keygen [identity-file]
+            Generate an age backup identity and public recipient
+  backup [recipient]
+            Create an encrypted, integrity-checked offline backup
+  restore <archive> <identity-file> [preserve|rotate]
+            Restore only into empty data directories; optionally rotate onion identity
+  evidence [output-directory]
+            Generate SLSA provenance, SBOMs, and vulnerability reports
+  issues    Show issue status and the recommended implementation order
+  legacy-state
+            Compare current and legacy runtime layouts without printing secrets
   restart   Stop and start the stack
   version   Print the project version
   help      Show this help
@@ -355,7 +572,16 @@ main() {
         status) cmd_status ;;
         test) cmd_test ;;
         config) cmd_config ;;
-        doctor) cmd_doctor ;;
+        doctor) shift; cmd_doctor "$@" ;;
+        fix-permissions) cmd_fix_permissions ;;
+        sync-pins) cmd_sync_pins ;;
+        migrate-users) shift; cmd_migrate_users "$@" ;;
+        backup-keygen) shift; cmd_backup_keygen "$@" ;;
+        backup) shift; cmd_backup "$@" ;;
+        restore) shift; cmd_restore "$@" ;;
+        evidence) shift; cmd_evidence "$@" ;;
+        issues) cmd_issues ;;
+        legacy-state) cmd_legacy_state ;;
         restart) cmd_restart ;;
         version) project_version ;;
         help|-h|--help) usage ;;

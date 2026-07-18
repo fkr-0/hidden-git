@@ -7,11 +7,31 @@ commands:
     description: Run static release checks
     category: test
     timeoutMs: 120000
+  evidence:
+    run: ["./run.sh", "evidence", "release-evidence"]
+    description: Generate release provenance, SBOMs, and vulnerability reports
+    category: build
+    timeoutMs: 2700000
   e2e:
     run: ["./tests/e2e.sh"]
     description: Run an isolated fresh-deployment onion SSH integration test
     category: test
     timeoutMs: 600000
+  backup-restore:
+    run: ["./tests/backup-restore.sh"]
+    description: Test encrypted backups and both restore identity modes
+    category: test
+    timeoutMs: 300000
+  non-root-migration:
+    run: ["./tests/non-root-migration.sh"]
+    description: Test the idempotent stable-UID ownership migration
+    category: test
+    timeoutMs: 300000
+  doctor:
+    run: ["./run.sh", "doctor", "--strict"]
+    description: Run the strict operator best-practice audit
+    category: lint
+    timeoutMs: 120000
   config:
     run: ["./run.sh", "config"]
     description: Render and validate the Docker Compose configuration

@@ -21,13 +21,13 @@ validate_port ONION_PUBLIC_PORT "$ONION_PUBLIC_PORT"
 validate_port ONION_TARGET_PORT "$ONION_TARGET_PORT"
 
 umask 077
-mkdir -p /var/lib/tor/hidden_service
+mkdir -p /var/lib/tor/hidden_service /run/hidden-git
 # The literal variable allow-list is intentionally passed to envsubst.
 # shellcheck disable=SC2016
 envsubst '${ONION_PUBLIC_PORT} ${ONION_TARGET_PORT}' \
     < /etc/tor/torrc.template \
-    > /etc/tor/torrc
+    > /run/hidden-git/torrc
 
-tor --verify-config -f /etc/tor/torrc
-exec tor -f /etc/tor/torrc
+tor --verify-config -f /run/hidden-git/torrc
+exec tor -f /run/hidden-git/torrc
 

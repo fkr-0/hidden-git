@@ -17,6 +17,8 @@ ENV_FILE="${TMP_DIR}/e2e.env"
 OVERRIDE_FILE="${TMP_DIR}/e2e.override.yml"
 LOG_FILE="${TMP_DIR}/compose.log"
 KEEP_ARTIFACTS="${KEEP_E2E_ARTIFACTS:-0}"
+E2E_CHECK_TIMEOUT_SECONDS="${E2E_CHECK_TIMEOUT_SECONDS:-360}"
+E2E_SSH_ATTEMPT_TIMEOUT_SECONDS="${E2E_SSH_ATTEMPT_TIMEOUT_SECONDS:-45}"
 
 require_cmd() {
     command -v "$1" >/dev/null 2>&1 || {
@@ -65,13 +67,14 @@ cp "${ROOT_DIR}/env.example" "$ENV_FILE"
 ssh-keygen -q -t ed25519 -N '' -C hidden-git-e2e -f "${TMP_DIR}/admin_key"
 admin_key="$(cat "${TMP_DIR}/admin_key.pub")"
 
-python - "$ENV_FILE" "$admin_key" <<'PY'
+python - "$ENV_FILE" "$admin_key" "$E2E_CHECK_TIMEOUT_SECONDS" <<'PY'
 from pathlib import Path
 import socket
 import sys
 
 path = Path(sys.argv[1])
 admin_key = sys.argv[2]
+check_timeout = sys.argv[3]
 
 def free_port() -> int:
     with socket.socket() as sock:
@@ -90,7 +93,7 @@ updates = {
     "SOFT_SERVE_SSH_PUBLIC_URL": f"ssh://localhost:{ssh_port}",
     "SOFT_SERVE_HTTP_PUBLIC_URL": f"http://localhost:{http_port}",
     "SOFT_SERVE_GIT_PUBLIC_URL": f"git://localhost:{git_port}",
-    "CHECK_TIMEOUT_SECONDS": "240",
+    "CHECK_TIMEOUT_SECONDS": check_timeout,
 }
 
 lines = []
@@ -113,7 +116,7 @@ services:
       - tor-e2e-data:/var/lib/tor
   tor-check:
     environment:
-      SSH_ATTEMPT_TIMEOUT_SECONDS: 20
+      SSH_ATTEMPT_TIMEOUT_SECONDS: ${E2E_SSH_ATTEMPT_TIMEOUT_SECONDS}
       SSH_IDENTITY_FILE: /run/secrets/hidden-git-e2e-key
     volumes:
       - tor-e2e-data:/var/lib/tor:ro
@@ -125,6 +128,15 @@ YAML
 
 "${compose[@]}" --profile check config >/dev/null
 "${compose[@]}" up -d --build --wait
+
+[[ "$("${compose[@]}" exec -T soft-serve id -u)" == '10001' ]]
+[[ "$("${compose[@]}" exec -T tor id -u)" == '10002' ]]
+soft_id="$("${compose[@]}" ps -q soft-serve)"
+tor_id="$("${compose[@]}" ps -q tor)"
+[[ "$(docker inspect --format '{{.HostConfig.ReadonlyRootfs}}' "$soft_id")" == 'true' ]]
+[[ "$(docker inspect --format '{{.HostConfig.ReadonlyRootfs}}' "$tor_id")" == 'true' ]]
+docker inspect --format '{{json .HostConfig.CapDrop}}' "$soft_id" | grep -q 'ALL'
+docker inspect --format '{{json .HostConfig.CapDrop}}' "$tor_id" | grep -q 'ALL'
 
 "${compose[@]}" exec -T soft-serve sh -ec \
     'test -s /run/hidden-git/soft-serve.config.yaml && grep -q "listen_addr" /run/hidden-git/soft-serve.config.yaml'

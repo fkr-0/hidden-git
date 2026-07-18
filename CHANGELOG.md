@@ -12,11 +12,45 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - GitHub Actions coverage for static checks, image builds, and the isolated
   authenticated onion SSH end-to-end test (`HG-004`).
 - Dependabot review configuration for Docker and GitHub Actions dependencies.
+- Actionable `doctor` PASS/WARN/FAIL reporting, strict audit mode, connection
+  hints in `status`, permission repair, and an issue-summary command.
+- Encrypted age backups with internal file manifests, checksum sidecars,
+  empty-target restore protection, and preserve-or-rotate onion identity modes.
+- A tested maintenance image and end-to-end backup/restore regression test.
+- Security and operator guidance in `SECURITY.md`.
+- A release-evidence command and tag-only CI artifact containing SLSA v1
+  provenance, CycloneDX SBOMs, and vulnerability reports for every image.
+- Safe `sync-pins` migration for existing environment files.
+- A vulnerability policy report that blocks fixable high or critical findings
+  while separately surfacing currently unfixed distro advisories.
+- Dedicated Soft Serve and Tor users with stable UIDs, an idempotent stopped-
+  stack migration, read-only root filesystems, dropped capabilities, and
+  `no-new-privileges`.
+- Tor readiness now requires control-port-confirmed 100% bootstrap rather than
+  treating creation of the onion hostname as network readiness.
+- Release evidence skips the irrelevant Java advisory database for these
+  non-Java images, avoiding an unnecessary large download.
+- Debian gettext helper JAR directories are excluded from Java analysis while
+  OS packages and embedded Go modules remain covered.
+- The pinned Soft Serve source is rebuilt with explicit fixed versions of Wish,
+  go-git, go-jose, `x/crypto`, and `x/net`; the binary retains version v0.11.6.
+- Soft Serve readiness uses an SSH-banner TCP probe, allowing the unused
+  OpenSSH client package to be removed from the runtime image.
+- Permission repair now preserves host ownership of top-level bind mounts while
+  retaining private modes and dedicated ownership below them.
+- State detection now runs inside the maintenance container, preventing
+  unreadable root-owned databases from being misclassified as fresh installs.
+- Doctor and `legacy-state` identify distinct legacy/current deployments without
+  printing database content, private keys, or onion addresses.
 
 ### Changed
 
 - Debian and Go base images are pinned to reviewed multi-architecture OCI
   digests while retaining readable image tags (`HG-005`).
+- GitHub Actions are pinned to immutable full commit SHAs.
+- The vulnerability scanner image is pinned by OCI digest and runs outside the
+  workflow action ecosystem.
+- The temporary provenance builder uses a digest-pinned BuildKit worker image.
 
 ## [0.0.2] - 2026-07-18
 

@@ -27,7 +27,8 @@ fi
 
 if command -v yamllint >/dev/null 2>&1; then
     yamllint -d '{extends: default, rules: {line-length: {max: 120}, document-start: disable}}' \
-        docker-compose.yml docker-compose.tor-check.override.yml issues.yml
+        docker-compose.yml docker-compose.tor-check.override.yml issues.yml \
+        .github/workflows/ci.yml .github/dependabot.yml
     pass 'YAML lint'
 else
     printf 'SKIP: yamllint is not installed\n'
@@ -42,6 +43,16 @@ grep -Eq '^DEBIAN_IMAGE=.*@sha256:[0-9a-f]{64}$' env.example \
     || fail 'DEBIAN_IMAGE is not pinned by digest'
 grep -Eq '^GO_IMAGE=.*@sha256:[0-9a-f]{64}$' env.example \
     || fail 'GO_IMAGE is not pinned by digest'
+grep -Eq '^TRIVY_IMAGE=.*@sha256:[0-9a-f]{64}$' env.example \
+    || fail 'TRIVY_IMAGE is not pinned by digest'
+grep -Eq '^BUILDKIT_IMAGE=.*@sha256:[0-9a-f]{64}$' env.example \
+    || fail 'BUILDKIT_IMAGE is not pinned by digest'
+for key in SOFT_SERVE_WISH_VERSION SOFT_SERVE_GO_GIT_VERSION \
+    SOFT_SERVE_GO_JOSE_VERSION SOFT_SERVE_X_CRYPTO_VERSION SOFT_SERVE_X_NET_VERSION; do
+    grep -Eq "^${key}=v[0-9]" env.example \
+        || fail "$key is not explicitly versioned"
+done
+pass 'Soft Serve security override versioning'
 grep -Eq '^ARG DEBIAN_IMAGE=.*@sha256:[0-9a-f]{64}$' Dockerfile.tor \
     || fail 'Tor base image is not pinned by digest'
 grep -Eq '^ARG GO_IMAGE=.*@sha256:[0-9a-f]{64}$' Dockerfile.soft-serve \
@@ -64,6 +75,11 @@ for protected in '.env' 'data' 'soft-serve-data' 'tor-data' 'trunk'; do
         || fail ".dockerignore does not protect: $protected"
 done
 pass 'Docker build-context secret hygiene'
+
+grep -Fxq 'backups/' .gitignore || fail 'encrypted backups are not ignored by Git'
+grep -Fxq 'backups' .dockerignore || fail 'encrypted backups enter the Docker build context'
+grep -Fxq 'release-evidence' .dockerignore || fail 'release evidence enters the Docker build context'
+pass 'backup secret hygiene'
 
 grep -Fq 'timeout --signal=TERM' scripts/tor-check.sh \
     || fail 'containerized SSH attempts lack a hard timeout'
@@ -94,13 +110,86 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
     rm -f "$legacy_env"
     trap - EXIT
     pass 'pre-0.0.2 environment compatibility'
+
+    sync_env="$(mktemp)"
+    trap 'rm -f "$sync_env" "${sync_env}.pre-sync-"*' EXIT
+    cp env.example "$sync_env"
+    sed -i \
+        -e 's#^DEBIAN_IMAGE=.*#DEBIAN_IMAGE=debian:trixie-slim#' \
+        -e 's#^GO_IMAGE=.*#GO_IMAGE=golang:1.26.5-bookworm#' \
+        -e '/^TRIVY_IMAGE=/d' \
+        -e '/^BUILDKIT_IMAGE=/d' \
+        -e 's/^SOFT_SERVE_SSH_PORT=.*/SOFT_SERVE_SSH_PORT=40123/' \
+        "$sync_env"
+    chmod 644 "$sync_env"
+    HIDDEN_GIT_ENV_FILE="$sync_env" ./run.sh sync-pins >/dev/null
+    grep -Fxq 'SOFT_SERVE_SSH_PORT=40123' "$sync_env" \
+        || fail 'sync-pins changed a deployment-specific port'
+    grep -Eq '^DEBIAN_IMAGE=.*@sha256:[0-9a-f]{64}$' "$sync_env" \
+        || fail 'sync-pins did not restore the Debian digest'
+    grep -Eq '^TRIVY_IMAGE=.*@sha256:[0-9a-f]{64}$' "$sync_env" \
+        || fail 'sync-pins did not add the scanner digest'
+    grep -Eq '^BUILDKIT_IMAGE=.*@sha256:[0-9a-f]{64}$' "$sync_env" \
+        || fail 'sync-pins did not add the BuildKit digest'
+    [[ "$(stat -c '%a' "$sync_env")" == '600' ]] \
+        || fail 'sync-pins did not restrict the environment file mode'
+    sync_backup="$(find "$(dirname "$sync_env")" -maxdepth 1 \
+        -name "$(basename "$sync_env").pre-sync-*" -print -quit)"
+    [[ -n "$sync_backup" && "$(stat -c '%a' "$sync_backup")" == '600' ]] \
+        || fail 'sync-pins did not create a private rollback copy'
+    rm -f "$sync_backup" "$sync_env"
+    trap - EXIT
+    pass 'safe release pin synchronization'
 else
     printf 'SKIP: Docker Compose is not available\n'
 fi
 
 ./run.sh help >/dev/null
 ./run.sh version | grep -Fq "$version"
+issues_output="$(./run.sh issues)"
+help_output="$(./run.sh help)"
+grep -Fq 'HG-001' <<<"$issues_output"
+grep -Fq 'doctor --strict' <<<"$help_output"
+grep -Fq 'sync-pins' <<<"$help_output"
+grep -Fq 'migrate-users' <<<"$help_output"
+grep -Fq 'legacy-state' <<<"$help_output"
+grep -Fq 'evidence' <<<"$help_output"
 pass 'Docker-free help and version commands'
+
+legacy_fixture="$(mktemp -d)"
+trap 'rm -rf "$legacy_fixture"' EXIT
+mkdir -p \
+    "$legacy_fixture/data/soft-serve/ssh" \
+    "$legacy_fixture/data/tor/hidden_service" \
+    "$legacy_fixture/soft-serve-data/ssh" \
+    "$legacy_fixture/tor-data/hidden_service"
+printf 'current database\n' > "$legacy_fixture/data/soft-serve/soft-serve.db"
+printf 'legacy database\n' > "$legacy_fixture/soft-serve-data/soft-serve.db"
+printf 'same host identity\n' > "$legacy_fixture/data/soft-serve/ssh/soft_serve_host_ed25519"
+cp "$legacy_fixture/data/soft-serve/ssh/soft_serve_host_ed25519" \
+    "$legacy_fixture/soft-serve-data/ssh/soft_serve_host_ed25519"
+printf 'current onion identity\n' > "$legacy_fixture/data/tor/hidden_service/hs_ed25519_secret_key"
+printf 'legacy onion identity\n' > "$legacy_fixture/tor-data/hidden_service/hs_ed25519_secret_key"
+legacy_output="$(./scripts/legacy-state.sh "$legacy_fixture")"
+grep -Eq '^database[[:space:]]+different$' <<<"$legacy_output"
+grep -Eq '^ssh-host-identity[[:space:]]+same$' <<<"$legacy_output"
+grep -Eq '^onion-identity[[:space:]]+different$' <<<"$legacy_output"
+if grep -Fq 'current onion identity' <<<"$legacy_output"; then
+    fail 'legacy-state leaked secret content'
+fi
+rm -rf "$legacy_fixture"
+trap - EXIT
+pass 'secret-safe legacy state comparison'
+
+PYTHONPYCACHEPREFIX=/tmp/hidden-git-pycache python3 -m py_compile \
+    scripts/extract-oci-provenance.py scripts/vulnerability-policy.py
+pass 'release evidence Python syntax'
+
+if grep -RhoE 'uses:[[:space:]]+[^[:space:]]+@(v[0-9]+|main|master|latest)' \
+    .github/workflows | grep -q .; then
+    fail 'GitHub Actions contain mutable action references'
+fi
+pass 'immutable GitHub Action references'
 
 [[ -f .github/workflows/ci.yml ]] || fail 'CI workflow is missing'
 [[ -f .github/dependabot.yml ]] || fail 'Dependabot configuration is missing'

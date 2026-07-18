@@ -1,6 +1,6 @@
 name: CI
 
-on:
+"on":
   push:
     branches: [main]
     tags: ["v*"]
@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
       - name: Install linters
         run: |
           sudo apt-get update
@@ -31,17 +31,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
       - name: Prepare build environment
         run: cp env.example .env
       - name: Build all images
         run: ./run.sh build
+      - name: Test encrypted backup and restore workflow
+        run: ./tests/backup-restore.sh
+      - name: Test dedicated-user ownership migration
+        run: ./tests/non-root-migration.sh
 
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
       - name: Run authenticated onion integration test
         env:
           KEEP_E2E_ARTIFACTS: "1"
@@ -49,8 +53,25 @@ jobs:
         run: ./tests/e2e.sh
       - name: Upload integration diagnostics
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: hidden-git-e2e-diagnostics
           path: ${{ runner.temp }}/hidden-git-e2e
           if-no-files-found: warn
+
+  release-evidence:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - name: Prepare release environment
+        run: cp env.example .env
+      - name: Generate provenance, SBOM, and vulnerability reports
+        run: ./run.sh evidence release-evidence
+      - name: Upload release evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: hidden-git-release-evidence-${{ github.ref_name }}
+          path: release-evidence
+          if-no-files-found: error

@@ -76,6 +76,16 @@ tracked separately in =issues.yml=.
 | =test=    | Run the live onion SSH connectivity check. |
 | =config=  | Print the fully interpolated Compose configuration. |
 | =doctor=  | Validate Docker, environment values, directories, and Compose. |
+| =doctor --strict= | Treat every best-practice warning as a failure. |
+| =fix-permissions= | Restrict local environment, data, and backup modes. |
+| =sync-pins= | Update reviewed release references without changing local ports or keys. |
+| =migrate-users= | Assign persistent data to the dedicated service UIDs. |
+| =backup-keygen= | Generate an offline age identity and public recipient. |
+| =backup= | Create an encrypted, integrity-checked stopped-state backup. |
+| =restore= | Restore into empty data directories, preserving or rotating the onion identity. |
+| =evidence= | Generate SLSA provenance, SBOMs, and vulnerability reports. |
+| =issues= | Show backlog status and recommended implementation order. |
+| =legacy-state= | Compare current and legacy deployments without printing secrets. |
 | =restart= | Stop and start the stack. |
 | =version= | Print the HiddenGit release version. |
 | =help=    | Show command help without requiring Docker or =.env=. |
@@ -99,6 +109,11 @@ the local file with =env.example= to adopt the explicit new settings.
   by multi-architecture OCI digest.
 - =GO_IMAGE= :: Go builder image, pinned by multi-architecture OCI digest.
 - =SOFT_SERVE_VERSION= :: Pinned upstream Soft Serve release.
+- =SOFT_SERVE_*_VERSION= :: Explicit security-only dependency overrides applied
+  to the pinned upstream source when an upstream release has not yet absorbed
+  available vulnerability fixes.
+- =TRIVY_IMAGE= :: Digest-pinned scanner used only for release evidence.
+- =BUILDKIT_IMAGE= :: Digest-pinned BuildKit worker used for provenance builds.
 
 ** Service identity and access
 
@@ -137,6 +152,54 @@ the first successful start when accurate onion clone hints are desired.
 - =SOFT_SERVE_DATA_PATH= :: Absolute data path inside the container.
 - =CI= :: Keeps Soft Serve in non-interactive container mode.
 - =CHECK_TIMEOUT_SECONDS= :: Upper bound for each live onion SSH probe.
+
+** Backups
+
+- =BACKUP_RECIPIENT= :: Public age recipient used to encrypt backups. The
+  matching identity must remain offline and outside this repository.
+- =BACKUP_IDENTITY_FILE= :: Optional local default identity path for restore.
+
+Run =./run.sh doctor= for actionable PASS/WARN/FAIL output. It reports valid but
+risky choices such as non-loopback publication, permissive secret directories,
+mutable dependency references, stale backups, or a non-rootless Docker daemon.
+=./run.sh doctor --strict= turns warnings into a non-zero exit status.
+
+Existing deployments can adopt reviewed version and digest references without
+changing local ports, keys, or public URLs:
+
+#+begin_src sh
+./run.sh sync-pins
+#+end_src
+
+The previous environment file is retained as a mode-0600 timestamped backup.
+
+* Encrypted backup and restore
+
+Generate a backup identity once:
+
+#+begin_src sh
+./run.sh backup-keygen
+#+end_src
+
+Store =backups/backup-identity.agekey= offline, then copy the displayed public
+recipient into =BACKUP_RECIPIENT=. For a consistent snapshot, stop services and
+create the backup:
+
+#+begin_src sh
+./run.sh down
+./run.sh backup
+#+end_src
+
+Restore refuses to overwrite existing data. Preserve the onion address with
+=preserve=, or deliberately create a new one with =rotate=:
+
+#+begin_src sh
+./run.sh restore backups/hidden-git-backup-YYYYmmddTHHMMSSZ.tar.age \
+  /offline/path/backup-identity.agekey preserve
+#+end_src
+
+Age authenticates the ciphertext; the archive also contains per-file SHA-256
+checksums and has a checksum sidecar. See =SECURITY.md= for operational limits.
 
 * Connecting through Tor
 
@@ -179,10 +242,35 @@ torsocks ssh -p 8002 admin@example.onion
 |-----------+----------+-------------|
 | =data/soft-serve/= | Repositories, SQLite DB, Soft Serve SSH keys | Secret/private |
 | =data/tor/= | Tor state and persistent onion identity | Secret/private |
+| =backups/= | Encrypted archives; identity files must be moved offline | Private |
 
 Back up both directories together. Do not copy them into release archives or
-bug reports. Containers may currently create files with root or distribution
-service ownership; a non-root migration is tracked as =HG-001=.
+bug reports. Soft Serve runs as =10001:10001= and Tor as =10002:10002= with a
+read-only root filesystem, no Linux capabilities, and =no-new-privileges=.
+
+For an existing pre-migration deployment, first create and verify an encrypted
+backup, stop the stack, then explicitly migrate ownership:
+
+#+begin_src sh
+./run.sh down
+./run.sh backup
+./run.sh migrate-users --confirm-existing
+./run.sh doctor
+#+end_src
+
+Fresh empty bind mounts are migrated automatically by =./run.sh up=. Existing
+state is never chowned implicitly.
+
+If =doctor= reports legacy runtime directories, run =./run.sh legacy-state=.
+The command reports only file counts, byte totals, UTC modification recency, and whether the
+database, SSH host identity, and onion identity are the same or different. A
+=different= result represents a separate deployment: back up both before
+selecting, exporting, merging, archiving, or deleting anything.
+
+Tor health is reported only after its authenticated local control port confirms
+100% network bootstrap and the onion hostname exists. Onion SSH probes remain
+bounded but use a longer per-attempt allowance in E2E because circuit and SSH
+handshakes can legitimately span several seconds.
 
 * Development and release checks
 
@@ -220,6 +308,16 @@ requests. The onion end-to-end job uses disposable credentials and volumes and
 uploads its retained workspace when it fails. Dependency update proposals are
 configured in =.github/dependabot.yml=.
 
+Tagged and manually requested CI runs also execute =./run.sh evidence=. A
+temporary BuildKit container builder emits SLSA v1 provenance into OCI archives;
+the digest-pinned Trivy image then produces CycloneDX SBOMs and JSON/text
+vulnerability reports. The bulky OCI archives are discarded after extraction
+unless =KEEP_EVIDENCE_IMAGES=1= is set.
+
+The evidence policy blocks any high or critical finding for which the scanner
+reports a fixed version. Current unfixed findings remain visible in =HG-008=;
+set =VULNERABILITY_POLICY_STRICT=1= to reject those as well.
+
 Release metadata lives in =VERSION= and =CHANGELOG.md=. Deferred larger work is
 kept in =issues.yml=.
 
@@ -231,6 +329,7 @@ kept in =issues.yml=.
 - =Dockerfile.soft-serve= :: Pinned Soft Serve build and runtime image.
 - =Dockerfile.tor= :: Tor hidden-service runtime.
 - =Dockerfile.tor-check= :: Reusable torsocks/SSH checker image.
+- =Dockerfile.maintenance= :: Offline backup, restore, and permission tooling.
 - =.dockerignore= :: Prevents runtime identities, databases, and local
   configuration from entering Docker build contexts.
 - =soft-serve.config.yaml.template= :: Managed Soft Serve configuration.
