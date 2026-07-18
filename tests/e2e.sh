@@ -2,7 +2,16 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TMP_DIR="$(mktemp -d /tmp/hidden-git-e2e.XXXXXX)"
+if [[ -n "${E2E_TMP_DIR:-}" ]]; then
+    TMP_DIR="${E2E_TMP_DIR}"
+    [[ ! -e "$TMP_DIR" ]] || {
+        printf 'E2E_TMP_DIR already exists: %s\n' "$TMP_DIR" >&2
+        exit 1
+    }
+    mkdir -p "$TMP_DIR"
+else
+    TMP_DIR="$(mktemp -d /tmp/hidden-git-e2e.XXXXXX)"
+fi
 PROJECT="hidden-git-e2e-$$"
 ENV_FILE="${TMP_DIR}/e2e.env"
 OVERRIDE_FILE="${TMP_DIR}/e2e.override.yml"

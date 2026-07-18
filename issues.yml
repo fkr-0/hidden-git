@@ -1,7 +1,8 @@
 schema_version: 1
 project: hidden-git
-target_release: 0.0.2
+target_release: 0.0.3
 generated_at: 2026-07-18
+updated_at: 2026-07-18
 
 issues:
   - id: HG-001
@@ -48,7 +49,7 @@ issues:
 
   - id: HG-004
     title: Add CI with real container and Tor integration coverage
-    status: open
+    status: closed
     priority: medium
     area: testing
     reason_deferred: >-
@@ -60,10 +61,15 @@ issues:
       - Start a fresh stack with an ephemeral administrator key.
       - Verify SSH reachability over the generated onion address.
       - Preserve useful container logs on failure.
+    resolution: >-
+      Added GitHub Actions jobs for static checks, all-image builds, and the
+      isolated authenticated onion SSH integration harness. Failed E2E runs
+      retain and upload the disposable test workspace and Compose logs.
+    closed_at: 2026-07-18
 
   - id: HG-005
     title: Pin base images by digest and automate dependency update review
-    status: open
+    status: in_progress
     priority: medium
     area: supply-chain
     reason_deferred: >-
@@ -73,6 +79,10 @@ issues:
       - Pin all release images by reviewed multi-architecture digest.
       - Add an automated update proposal workflow.
       - Record provenance and vulnerability-scan output for releases.
+    progress:
+      - Debian and Go release image references are pinned by OCI index digest.
+      - Dependabot is configured for Docker and GitHub Actions updates.
+      - Release provenance and vulnerability scan artifacts remain open.
 
   - id: HG-006
     title: Select and publish a project license

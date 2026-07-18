@@ -95,8 +95,9 @@ the local file with =env.example= to adopt the explicit new settings.
 ** Images and versions
 
 - =HIDDEN_GIT_VERSION= :: Project release version; must match =VERSION=.
-- =DEBIAN_IMAGE= :: Runtime base for Tor, Soft Serve, and the checker.
-- =GO_IMAGE= :: Go builder image.
+- =DEBIAN_IMAGE= :: Runtime base for Tor, Soft Serve, and the checker, pinned
+  by multi-architecture OCI digest.
+- =GO_IMAGE= :: Go builder image, pinned by multi-architecture OCI digest.
 - =SOFT_SERVE_VERSION= :: Pinned upstream Soft Serve release.
 
 ** Service identity and access
@@ -213,6 +214,11 @@ random local ports, and disposable named volumes:
 This validates database initialization, the generated Soft Serve configuration,
 authenticated local SSH, and authenticated SSH through the onion service without
 touching =./data= or =.env=. Set =KEEP_E2E_ARTIFACTS=1= to retain failure logs.
+
+GitHub Actions runs the static checks and image build for pushes and pull
+requests. The onion end-to-end job uses disposable credentials and volumes and
+uploads its retained workspace when it fails. Dependency update proposals are
+configured in =.github/dependabot.yml=.
 
 Release metadata lives in =VERSION= and =CHANGELOG.md=. Deferred larger work is
 kept in =issues.yml=.

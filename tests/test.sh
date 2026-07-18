@@ -38,6 +38,16 @@ grep -Fq "## [$version]" CHANGELOG.md || fail "CHANGELOG.md has no release secti
 grep -Fq "HIDDEN_GIT_VERSION=$version" env.example || fail "env.example version differs from VERSION"
 pass 'version consistency'
 
+grep -Eq '^DEBIAN_IMAGE=.*@sha256:[0-9a-f]{64}$' env.example \
+    || fail 'DEBIAN_IMAGE is not pinned by digest'
+grep -Eq '^GO_IMAGE=.*@sha256:[0-9a-f]{64}$' env.example \
+    || fail 'GO_IMAGE is not pinned by digest'
+grep -Eq '^ARG DEBIAN_IMAGE=.*@sha256:[0-9a-f]{64}$' Dockerfile.tor \
+    || fail 'Tor base image is not pinned by digest'
+grep -Eq '^ARG GO_IMAGE=.*@sha256:[0-9a-f]{64}$' Dockerfile.soft-serve \
+    || fail 'Go builder image is not pinned by digest'
+pass 'container image digest pinning'
+
 for forbidden in '.env' '.envBackup' 'data/' 'soft-serve-data/' 'tor-data/' 'trunk/'; do
     if git ls-files | grep -Eq "^${forbidden//./\.}"; then
         fail "runtime or secret path is tracked: $forbidden"
@@ -91,6 +101,10 @@ fi
 ./run.sh help >/dev/null
 ./run.sh version | grep -Fq "$version"
 pass 'Docker-free help and version commands'
+
+[[ -f .github/workflows/ci.yml ]] || fail 'CI workflow is missing'
+[[ -f .github/dependabot.yml ]] || fail 'Dependabot configuration is missing'
+pass 'repository automation manifests'
 
 printf 'All static release checks passed.\n'
 

@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hidden-git-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install linters
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck yamllint
+      - name: Run static release checks
+        run: ./tests/test.sh
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare build environment
+        run: cp env.example .env
+      - name: Build all images
+        run: ./run.sh build
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run authenticated onion integration test
+        env:
+          KEEP_E2E_ARTIFACTS: "1"
+          E2E_TMP_DIR: ${{ runner.temp }}/hidden-git-e2e
+        run: ./tests/e2e.sh
+      - name: Upload integration diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hidden-git-e2e-diagnostics
+          path: ${{ runner.temp }}/hidden-git-e2e
+          if-no-files-found: warn
