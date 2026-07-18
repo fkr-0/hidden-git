@@ -14,6 +14,53 @@ log() {
     printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
 }
 
+runtime_is_rootless() {
+    docker info --format '{{json .SecurityOptions}}' 2>/dev/null | grep -q 'rootless'
+}
+
+maintenance_output_uid() {
+    if runtime_is_rootless; then
+        printf '0\n'
+    else
+        id -u
+    fi
+}
+
+maintenance_output_gid() {
+    if runtime_is_rootless; then
+        printf '0\n'
+    else
+        id -g
+    fi
+}
+
+build_maintenance_image() {
+    "${COMPOSE_MAINTENANCE[@]}" build maintenance >/dev/null
+    local image
+    image="$(docker image ls \
+        --filter label=com.docker.compose.project=hidden-git \
+        --filter label=com.docker.compose.service=maintenance \
+        -q | head -n1)"
+    [[ -n "$image" ]] || fail 'maintenance image was not produced'
+    printf '%s\n' "$image"
+}
+
+set_env_value() {
+    local key="$1"
+    local value="$2"
+    local tmp
+    tmp="$(mktemp)"
+    awk -v wanted="$key" -v replacement="$value" '
+        BEGIN { found = 0 }
+        $0 ~ "^" wanted "=" { print wanted "=" replacement; found = 1; next }
+        { print }
+        END { if (!found) print wanted "=" replacement }
+    ' "$ENV_FILE" > "$tmp"
+    cat "$tmp" > "$ENV_FILE"
+    rm -f "$tmp"
+    chmod 600 "$ENV_FILE"
+}
+
 cmd_migrate_users() {
     require_runtime
     require_services_stopped
@@ -36,8 +83,9 @@ runtime_contains_state() {
 }
 
 runtime_ownership_ok() {
-    [[ "$(stat -c '%u:%g' "${ROOT_DIR}/data/soft-serve" 2>/dev/null || true)" == '10001:10001' \
-        && "$(stat -c '%u:%g' "${ROOT_DIR}/data/tor" 2>/dev/null || true)" == '10002:10002' ]]
+    OUTPUT_UID="$(maintenance_output_uid)" OUTPUT_GID="$(maintenance_output_gid)" \
+        "${COMPOSE_MAINTENANCE[@]}" run --rm --build -T maintenance ownership-ok \
+        >/dev/null 2>&1
 }
 
 ensure_runtime_ownership() {
@@ -71,12 +119,13 @@ cmd_sync_pins() {
     local backup key
     backup="${ENV_FILE}.pre-sync-$(date -u '+%Y%m%dT%H%M%SZ')"
     cp -p "$ENV_FILE" "$backup"
-    for key in HIDDEN_GIT_VERSION DEBIAN_IMAGE GO_IMAGE SOFT_SERVE_VERSION \
+    for key in HIDDEN_GIT_VERSION ALPINE_IMAGE GO_IMAGE SOFT_SERVE_VERSION \
         SOFT_SERVE_WISH_VERSION SOFT_SERVE_GO_GIT_VERSION \
         SOFT_SERVE_GO_JOSE_VERSION SOFT_SERVE_X_CRYPTO_VERSION \
-        SOFT_SERVE_X_NET_VERSION TRIVY_IMAGE BUILDKIT_IMAGE; do
+        SOFT_SERVE_X_NET_VERSION TRIVY_IMAGE BUILDKIT_IMAGE DIND_ROOTLESS_IMAGE; do
         sync_env_key_from_example "$key"
     done
+    sed -i '/^DEBIAN_IMAGE=/d' "$ENV_FILE"
     chmod 600 "$ENV_FILE" "$backup"
     log "Updated reviewed release references in $ENV_FILE"
     log "Previous environment saved at $backup"
@@ -187,7 +236,7 @@ validate_environment() {
 validate_first_boot_admin() {
     local admin_keys
     admin_keys="$(read_env_value SOFT_SERVE_INITIAL_ADMIN_KEYS)"
-    if [[ ! -s "${ROOT_DIR}/data/soft-serve/soft-serve.db" && -z "$admin_keys" ]]; then
+    if ! runtime_contains_state && [[ -z "$admin_keys" ]]; then
         fail "SOFT_SERVE_INITIAL_ADMIN_KEYS is required before first boot"
     fi
 }
@@ -424,7 +473,7 @@ cmd_doctor() {
 cmd_fix_permissions() {
     require_runtime
     chmod 600 "$ENV_FILE"
-    OUTPUT_UID="$(id -u)" OUTPUT_GID="$(id -g)" \
+    OUTPUT_UID="$(maintenance_output_uid)" OUTPUT_GID="$(maintenance_output_gid)" \
         "${COMPOSE_MAINTENANCE[@]}" run --rm --build -T maintenance permissions
     log "Applied private permissions to .env, runtime data, and backups"
 }
@@ -435,24 +484,83 @@ cmd_backup_keygen() {
     local target="${1:-${ROOT_DIR}/backups/backup-identity.agekey}"
     target="$(realpath -m "$target")"
     mkdir -p "$(dirname "$target")"
-    OUTPUT_UID="$(id -u)" OUTPUT_GID="$(id -g)" \
+    OUTPUT_UID="$(maintenance_output_uid)" OUTPUT_GID="$(maintenance_output_gid)" \
         "${COMPOSE_MAINTENANCE[@]}" run --rm --build -T \
         -v "$(dirname "$target"):/keys" \
         maintenance keygen "/keys/$(basename "$target")"
     log "Keep the identity file offline; configure only its public recipient in .env"
 }
 
-cmd_backup() {
+backup_state_layout() {
+    local label="$1"
+    local soft_serve_dir="$2"
+    local tor_dir="$3"
+    local recipient="$4"
+    [[ -d "$soft_serve_dir" ]] || fail "Soft Serve state directory not found: $soft_serve_dir"
+    [[ -d "$tor_dir" ]] || fail "Tor state directory not found: $tor_dir"
+
+    local image output archive_name
+    image="$(build_maintenance_image)"
+    output="$(docker run --rm --network none \
+        -v "$soft_serve_dir:/hidden-git/data/soft-serve:ro" \
+        -v "$tor_dir:/hidden-git/data/tor:ro" \
+        -v "$ROOT_DIR/backups:/hidden-git/backups" \
+        -e "BACKUP_RECIPIENT=${recipient}" \
+        -e "BACKUP_LABEL=${label}" \
+        -e "OUTPUT_UID=$(maintenance_output_uid)" \
+        -e "OUTPUT_GID=$(maintenance_output_gid)" \
+        "$image" backup)"
+    archive_name="$(basename "$(tail -n1 <<<"$output")")"
+    [[ -f "$ROOT_DIR/backups/$archive_name" ]] \
+        || fail "backup command did not produce the expected archive"
+    printf '%s\n' "$ROOT_DIR/backups/$archive_name"
+}
+
+cmd_backup_state() {
     require_runtime
     validate_environment
     require_services_stopped
     ensure_runtime_directories
-    local recipient="${1:-$(read_env_value BACKUP_RECIPIENT)}"
+    local layout="${1:-current}"
+    local recipient="${2:-$(read_env_value BACKUP_RECIPIENT)}"
     [[ -n "$recipient" ]] \
         || fail "backup recipient missing; pass one or set BACKUP_RECIPIENT in .env"
-    OUTPUT_UID="$(id -u)" OUTPUT_GID="$(id -g)" \
-        "${COMPOSE_MAINTENANCE[@]}" run --rm --build -T \
-        -e "BACKUP_RECIPIENT=${recipient}" maintenance backup
+    case "$layout" in
+        current)
+            backup_state_layout current "$ROOT_DIR/data/soft-serve" "$ROOT_DIR/data/tor" "$recipient"
+            ;;
+        legacy)
+            backup_state_layout legacy "$ROOT_DIR/soft-serve-data" "$ROOT_DIR/tor-data" "$recipient"
+            ;;
+        *) fail "backup-state layout must be current or legacy" ;;
+    esac
+}
+
+cmd_backup() {
+    cmd_backup_state current "${1:-}"
+}
+
+cmd_verify_backup() {
+    require_runtime
+    local archive="${1:-}"
+    local identity="${2:-$(read_env_value BACKUP_IDENTITY_FILE)}"
+    [[ -n "$archive" && -n "$identity" ]] \
+        || fail "usage: ./run.sh verify-backup <archive> <identity-file>"
+    archive="$(realpath "$archive")"
+    identity="$(realpath "$identity")"
+    [[ -f "$archive" && -f "${archive}.sha256" ]] \
+        || fail "backup archive or checksum sidecar is missing"
+    [[ -f "$identity" ]] || fail "backup identity not found: $identity"
+
+    local image
+    image="$(build_maintenance_image)"
+    docker run --rm --network none \
+        -v "$archive:/run/backup.tar.age:ro" \
+        -v "${archive}.sha256:/run/backup.tar.age.sha256:ro" \
+        -v "$identity:/run/secrets/age-identity:ro" \
+        -e VERIFY_ARCHIVE=/run/backup.tar.age \
+        -e VERIFY_IDENTITY_FILE=/run/secrets/age-identity \
+        "$image" verify
 }
 
 cmd_restore() {
@@ -472,7 +580,7 @@ cmd_restore() {
     [[ -f "${archive}.sha256" ]] || fail "backup checksum sidecar not found: ${archive}.sha256"
     [[ "$mode" == preserve || "$mode" == rotate ]] \
         || fail "restore mode must be preserve or rotate"
-    OUTPUT_UID="$(id -u)" OUTPUT_GID="$(id -g)" \
+    OUTPUT_UID="$(maintenance_output_uid)" OUTPUT_GID="$(maintenance_output_gid)" \
         "${COMPOSE_MAINTENANCE[@]}" run --rm --build -T \
         -v "$archive:/run/backup.tar.age:ro" \
         -v "${archive}.sha256:/run/backup.tar.age.sha256:ro" \
@@ -497,21 +605,165 @@ cmd_issues() {
         END { emit() }
     ' "$ROOT_DIR/issues.yml"
     printf '%s\n' '────────────────────────────────────────────────────────────────────'
-    printf '%s\n' 'Recommended order: HG-009 state reconciliation → HG-008 vulnerability triage → HG-001 rootless compatibility.'
-    printf '%s\n' 'HG-006 requires an explicit maintainer license decision; HG-003 is optional defense in depth.'
+    printf '%s\n' 'All 0.0.3 release blockers are closed.'
+    printf '%s\n' 'HG-003 remains an optional defense-in-depth feature for a later release.'
 }
 
 cmd_legacy_state() {
     require_runtime
     local image
-    image="$(read_env_value DEBIAN_IMAGE)"
+    image="$(read_env_value ALPINE_IMAGE)"
     [[ "$image" =~ @sha256:[0-9a-f]{64}$ ]] \
-        || fail "DEBIAN_IMAGE must be digest-pinned; run './run.sh sync-pins'"
+        || fail "ALPINE_IMAGE must be digest-pinned; run './run.sh sync-pins'"
 
     docker run --rm --network none \
         -v "$ROOT_DIR:/repo:ro" \
         -v "$ROOT_DIR/scripts/legacy-state.sh:/usr/local/bin/hidden-git-legacy-state:ro" \
         "$image" /usr/local/bin/hidden-git-legacy-state /repo
+}
+
+state_inventory_json() (
+    local require_legacy="${1:-0}"
+    local image tmp output_uid output_gid
+    image="$(read_env_value ALPINE_IMAGE)"
+    [[ "$image" =~ @sha256:[0-9a-f]{64}$ ]] \
+        || fail "ALPINE_IMAGE must be digest-pinned; run './run.sh sync-pins'"
+    tmp="$(mktemp -d)"
+    output_uid="$(maintenance_output_uid)"
+    output_gid="$(maintenance_output_gid)"
+    trap 'rm -rf "${tmp:-}"' EXIT
+
+    docker run --rm --network none \
+        -v "$ROOT_DIR:/repo:ro" \
+        -v "$tmp:/out" \
+        -e "OUTPUT_UID=$output_uid" \
+        -e "OUTPUT_GID=$output_gid" \
+        "$image" sh -ec '
+            for suffix in "" -wal -shm; do
+                source="/repo/data/soft-serve/soft-serve.db${suffix}"
+                [ ! -f "$source" ] || cp "$source" "/out/current.db${suffix}"
+            done
+            if [ -f /repo/soft-serve-data/soft-serve.db ]; then
+                for suffix in "" -wal -shm; do
+                    source="/repo/soft-serve-data/soft-serve.db${suffix}"
+                    [ ! -f "$source" ] || cp "$source" "/out/legacy.db${suffix}"
+                done
+            fi
+            chown "$OUTPUT_UID:$OUTPUT_GID" /out/*.db* 2>/dev/null || true
+            chmod 600 /out/*.db*
+        '
+
+    if [[ "$require_legacy" == 1 && ! -f "$tmp/legacy.db" ]]; then
+        fail 'legacy Soft Serve database is not present'
+    fi
+    local args=("current=$tmp/current.db")
+    [[ ! -f "$tmp/legacy.db" ]] || args+=("legacy=$tmp/legacy.db")
+    python3 "$ROOT_DIR/scripts/state-inventory.py" "${args[@]}"
+)
+
+cmd_state_inventory() {
+    require_runtime
+    require_services_stopped
+    state_inventory_json 0
+}
+
+cmd_reconcile_state() {
+    require_runtime
+    validate_environment
+    require_services_stopped
+    [[ "${1:-}" == '--confirm-current-authoritative' ]] \
+        || fail "usage: ./run.sh reconcile-state --confirm-current-authoritative [identity-file]"
+    [[ -d "$ROOT_DIR/soft-serve-data" && -d "$ROOT_DIR/tor-data" ]] \
+        || fail 'legacy soft-serve-data/ and tor-data/ directories are both required'
+
+    local identity inventory current_repos legacy_repos recipient
+    identity="${2:-$ROOT_DIR/backups/reconciliation-identity.agekey}"
+    identity="$(realpath -m "$identity")"
+    inventory="$(state_inventory_json 1)"
+    read -r current_repos legacy_repos < <(
+        python3 -c '
+import json, sys
+d=json.load(sys.stdin)["deployments"]
+print(d["current"]["repository_count"], d["legacy"]["repository_count"])
+' <<<"$inventory"
+    )
+    if ((legacy_repos > 0)); then
+        fail "legacy deployment contains ${legacy_repos} repositories; export and import them before archiving"
+    fi
+    log "State inventory: current repositories=${current_repos}, legacy repositories=${legacy_repos}"
+    log 'No unique legacy repositories require migration'
+
+    if [[ ! -f "$identity" ]]; then
+        cmd_backup_keygen "$identity"
+    fi
+    [[ -f "${identity}.recipient" ]] \
+        || fail "backup recipient file is missing: ${identity}.recipient"
+    recipient="$(tr -d '\r\n' < "${identity}.recipient")"
+    [[ "$recipient" == age1* ]] || fail 'generated backup recipient is invalid'
+    set_env_value BACKUP_RECIPIENT "$recipient"
+    set_env_value BACKUP_IDENTITY_FILE "$identity"
+
+    local current_archive legacy_archive
+    current_archive="$(cmd_backup_state current "$recipient")"
+    legacy_archive="$(cmd_backup_state legacy "$recipient")"
+    cmd_verify_backup "$current_archive" "$identity" >/dev/null
+    cmd_verify_backup "$legacy_archive" "$identity" >/dev/null
+    log "Verified current backup: $current_archive"
+    log "Verified legacy backup: $legacy_archive"
+
+    local timestamp archive_name archive_dir image output_uid output_gid report
+    timestamp="$(date -u '+%Y%m%dT%H%M%SZ')"
+    archive_name="legacy-${timestamp}"
+    archive_dir="$ROOT_DIR/retired-state/$archive_name"
+    image="$(read_env_value ALPINE_IMAGE)"
+    output_uid="$(maintenance_output_uid)"
+    output_gid="$(maintenance_output_gid)"
+    docker run --rm --network none \
+        -v "$ROOT_DIR:/repo" \
+        -e "ARCHIVE_NAME=$archive_name" \
+        -e "OUTPUT_UID=$output_uid" \
+        -e "OUTPUT_GID=$output_gid" \
+        "$image" sh -ec '
+            umask 077
+            test -d /repo/soft-serve-data
+            test -d /repo/tor-data
+            mkdir -p "/repo/retired-state/$ARCHIVE_NAME"
+            mv /repo/soft-serve-data "/repo/retired-state/$ARCHIVE_NAME/"
+            mv /repo/tor-data "/repo/retired-state/$ARCHIVE_NAME/"
+            chown "$OUTPUT_UID:$OUTPUT_GID" /repo/retired-state "/repo/retired-state/$ARCHIVE_NAME" 2>/dev/null || true
+            chmod 700 /repo/retired-state "/repo/retired-state/$ARCHIVE_NAME"
+        '
+
+    report="$archive_dir/RECONCILIATION.json"
+    INVENTORY_JSON="$inventory" \
+        python3 - "$report" "$current_archive" "$legacy_archive" "$timestamp" <<'PY'
+import json
+import os
+import pathlib
+import sys
+
+inventory = json.loads(os.environ["INVENTORY_JSON"])
+report = {
+    "schema_version": 1,
+    "reconciled_at": sys.argv[4],
+    "authoritative_layout": "data/",
+    "retired_layout": "soft-serve-data/ + tor-data/",
+    "decision": "current layout is configured, newer, and legacy contains no repositories",
+    "repository_migration": "not required",
+    "backups": {
+        "current": pathlib.Path(sys.argv[2]).name,
+        "legacy": pathlib.Path(sys.argv[3]).name,
+    },
+    "inventory": inventory,
+}
+path = pathlib.Path(sys.argv[1])
+path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+path.chmod(0o600)
+PY
+
+    cmd_migrate_users --confirm-existing >/dev/null
+    log "Archived retired deployment at $archive_dir"
+    log 'Current data/ is authoritative and migrated to dedicated service ownership'
 }
 
 cmd_restart() {
@@ -547,6 +799,10 @@ Commands:
             Generate an age backup identity and public recipient
   backup [recipient]
             Create an encrypted, integrity-checked offline backup
+  backup-state <current|legacy> [recipient]
+            Back up an explicitly selected deployment layout
+  verify-backup <archive> <identity-file>
+            Decrypt and verify a backup without restoring it
   restore <archive> <identity-file> [preserve|rotate]
             Restore only into empty data directories; optionally rotate onion identity
   evidence [output-directory]
@@ -554,6 +810,10 @@ Commands:
   issues    Show issue status and the recommended implementation order
   legacy-state
             Compare current and legacy runtime layouts without printing secrets
+  state-inventory
+            Report repository and user metadata from deployment databases
+  reconcile-state --confirm-current-authoritative [identity-file]
+            Back up both layouts, archive the empty legacy deployment, and migrate current ownership
   restart   Stop and start the stack
   version   Print the project version
   help      Show this help
@@ -578,10 +838,14 @@ main() {
         migrate-users) shift; cmd_migrate_users "$@" ;;
         backup-keygen) shift; cmd_backup_keygen "$@" ;;
         backup) shift; cmd_backup "$@" ;;
+        backup-state) shift; cmd_backup_state "$@" ;;
+        verify-backup) shift; cmd_verify_backup "$@" ;;
         restore) shift; cmd_restore "$@" ;;
         evidence) shift; cmd_evidence "$@" ;;
         issues) cmd_issues ;;
         legacy-state) cmd_legacy_state ;;
+        state-inventory) cmd_state_inventory ;;
+        reconcile-state) shift; cmd_reconcile_state "$@" ;;
         restart) cmd_restart ;;
         version) project_version ;;
         help|-h|--help) usage ;;

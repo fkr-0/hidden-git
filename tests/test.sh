@@ -39,21 +39,27 @@ grep -Fq "## [$version]" CHANGELOG.md || fail "CHANGELOG.md has no release secti
 grep -Fq "HIDDEN_GIT_VERSION=$version" env.example || fail "env.example version differs from VERSION"
 pass 'version consistency'
 
-grep -Eq '^DEBIAN_IMAGE=.*@sha256:[0-9a-f]{64}$' env.example \
-    || fail 'DEBIAN_IMAGE is not pinned by digest'
+grep -Fq 'MIT License' LICENSE || fail 'canonical MIT license text is missing'
+grep -Fq 'MIT License' README.org || fail 'README does not reference the license'
+pass 'license metadata'
+
+grep -Eq '^ALPINE_IMAGE=.*@sha256:[0-9a-f]{64}$' env.example \
+    || fail 'ALPINE_IMAGE is not pinned by digest'
 grep -Eq '^GO_IMAGE=.*@sha256:[0-9a-f]{64}$' env.example \
     || fail 'GO_IMAGE is not pinned by digest'
 grep -Eq '^TRIVY_IMAGE=.*@sha256:[0-9a-f]{64}$' env.example \
     || fail 'TRIVY_IMAGE is not pinned by digest'
 grep -Eq '^BUILDKIT_IMAGE=.*@sha256:[0-9a-f]{64}$' env.example \
     || fail 'BUILDKIT_IMAGE is not pinned by digest'
+grep -Eq '^DIND_ROOTLESS_IMAGE=.*@sha256:[0-9a-f]{64}$' env.example \
+    || fail 'DIND_ROOTLESS_IMAGE is not pinned by digest'
 for key in SOFT_SERVE_WISH_VERSION SOFT_SERVE_GO_GIT_VERSION \
     SOFT_SERVE_GO_JOSE_VERSION SOFT_SERVE_X_CRYPTO_VERSION SOFT_SERVE_X_NET_VERSION; do
     grep -Eq "^${key}=v[0-9]" env.example \
         || fail "$key is not explicitly versioned"
 done
 pass 'Soft Serve security override versioning'
-grep -Eq '^ARG DEBIAN_IMAGE=.*@sha256:[0-9a-f]{64}$' Dockerfile.tor \
+grep -Eq '^ARG ALPINE_IMAGE=.*@sha256:[0-9a-f]{64}$' Dockerfile.tor \
     || fail 'Tor base image is not pinned by digest'
 grep -Eq '^ARG GO_IMAGE=.*@sha256:[0-9a-f]{64}$' Dockerfile.soft-serve \
     || fail 'Go builder image is not pinned by digest'
@@ -115,7 +121,7 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
     trap 'rm -f "$sync_env" "${sync_env}.pre-sync-"*' EXIT
     cp env.example "$sync_env"
     sed -i \
-        -e 's#^DEBIAN_IMAGE=.*#DEBIAN_IMAGE=debian:trixie-slim#' \
+        -e 's#^ALPINE_IMAGE=.*#ALPINE_IMAGE=alpine:3.23#' \
         -e 's#^GO_IMAGE=.*#GO_IMAGE=golang:1.26.5-bookworm#' \
         -e '/^TRIVY_IMAGE=/d' \
         -e '/^BUILDKIT_IMAGE=/d' \
@@ -125,8 +131,8 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
     HIDDEN_GIT_ENV_FILE="$sync_env" ./run.sh sync-pins >/dev/null
     grep -Fxq 'SOFT_SERVE_SSH_PORT=40123' "$sync_env" \
         || fail 'sync-pins changed a deployment-specific port'
-    grep -Eq '^DEBIAN_IMAGE=.*@sha256:[0-9a-f]{64}$' "$sync_env" \
-        || fail 'sync-pins did not restore the Debian digest'
+    grep -Eq '^ALPINE_IMAGE=.*@sha256:[0-9a-f]{64}$' "$sync_env" \
+        || fail 'sync-pins did not restore the Alpine digest'
     grep -Eq '^TRIVY_IMAGE=.*@sha256:[0-9a-f]{64}$' "$sync_env" \
         || fail 'sync-pins did not add the scanner digest'
     grep -Eq '^BUILDKIT_IMAGE=.*@sha256:[0-9a-f]{64}$' "$sync_env" \
@@ -193,6 +199,9 @@ pass 'immutable GitHub Action references'
 
 [[ -f .github/workflows/ci.yml ]] || fail 'CI workflow is missing'
 [[ -f .github/dependabot.yml ]] || fail 'Dependabot configuration is missing'
+[[ -x tests/rootless-docker.sh ]] || fail 'rootless Docker integration test is missing or not executable'
+grep -Fq 'rootless-docker' .github/workflows/ci.yml \
+    || fail 'CI does not run the rootless Docker integration test'
 pass 'repository automation manifests'
 
 printf 'All static release checks passed.\n'

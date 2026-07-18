@@ -1,11 +1,9 @@
-ARG DEBIAN_IMAGE=debian:trixie-slim@sha256:020c0d20b9880058cbe785a9db107156c3c75c2ac944a6aa7ab59f2add76a7bd
-FROM ${DEBIAN_IMAGE}
+ARG ALPINE_IMAGE=alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
+FROM ${ALPINE_IMAGE}
 
-RUN DEBIAN_FRONTEND=noninteractive apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates tor tini gettext-base && \
-    rm -rf /var/lib/apt/lists/* && \
-    printf 'hidden-tor:x:10002:\n' >> /etc/group && \
-    printf 'hidden-tor:x:10002:10002:HiddenGit Tor service:/var/lib/tor:/usr/sbin/nologin\n' >> /etc/passwd && \
+RUN apk add --no-cache bash ca-certificates coreutils gettext-envsubst tini tor && \
+    addgroup -g 10002 -S hidden-tor && \
+    adduser -u 10002 -S -D -H -h /var/lib/tor -s /sbin/nologin -G hidden-tor hidden-tor && \
     install -d -o 10002 -g 10002 -m 0700 /var/lib/tor /run/hidden-git
 
 COPY ./soft-serve-hidden-service.torrc.template /etc/tor/torrc.template
@@ -14,4 +12,4 @@ COPY --chmod=0755 scripts/tor-healthcheck.sh /usr/local/bin/hidden-git-tor-healt
 VOLUME ["/var/lib/tor"]
 USER 10002:10002
 
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/hidden-git-tor-entrypoint"]
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/hidden-git-tor-entrypoint"]

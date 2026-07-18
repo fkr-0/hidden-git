@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile.tor-check
       args:
-        DEBIAN_IMAGE: ${DEBIAN_IMAGE}
+        ALPINE_IMAGE: ${ALPINE_IMAGE}
     network_mode: "service:tor"
     depends_on:
       tor:

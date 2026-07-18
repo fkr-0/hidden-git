@@ -45,11 +45,10 @@ merge or delete distinct databases or onion identities without verified backups.
 
 ## Known limitations
 
-- The service processes are non-root, but the local Docker daemon may still be
-  rootful. A rootless Docker or Podman compatibility pass remains in `HG-001`.
+- The host operator may still choose a rootful Docker daemon. The release test
+  suite also validates the complete Compose path against rootless Docker.
 - Tor v3 client authorization is not yet managed by the project (`HG-003`). SSH
   public-key authentication remains mandatory at Soft Serve.
-- A project license still requires an explicit maintainer decision (`HG-006`).
 
 Report suspected vulnerabilities privately to the repository maintainer rather
 than opening a public issue containing exploit details or secrets.
@@ -61,14 +60,12 @@ SLSA v1 provenance. A digest-pinned Trivy container generates CycloneDX SBOMs
 and timestamped vulnerability reports. Evidence output is ignored by Git and is
 uploaded by CI for tagged releases and explicit manual runs.
 
-The default evidence policy fails when Trivy reports a high or critical finding
-with an available fixed version. Unfixed high or critical findings are retained
-for explicit triage under `HG-008`; set `VULNERABILITY_POLICY_STRICT=1` to reject
-those as well.
+Release evidence uses strict policy and fails on every HIGH or CRITICAL finding,
+whether or not an upstream fixed version is already advertised.
 
-The scanner excludes Debian's gettext helper JAR directories from Java analysis;
-they are not executed by HiddenGit. OS packages and embedded Go modules remain
-included in both the SBOM and vulnerability reports.
+OS packages and embedded Go modules remain included in both the SBOM and
+vulnerability reports. Release runtimes use a digest-pinned Alpine base to keep
+the package surface small.
 
 When the pinned Soft Serve release contains a dependency with an available
 security fix, the builder downloads the checksummed upstream module source and

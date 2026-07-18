@@ -7,7 +7,7 @@ TMP_DIR="$(mktemp -d /tmp/hidden-git-backup-test.XXXXXX)"
 
 cleanup() {
     docker run --rm -v "$TMP_DIR:/work" \
-        "$(sed -n 's/^DEBIAN_IMAGE=//p' "$ROOT_DIR/env.example")" \
+        "$(sed -n 's/^ALPINE_IMAGE=//p' "$ROOT_DIR/env.example")" \
         sh -lc 'chmod -R a+rwX /work' >/dev/null 2>&1 || true
     rm -rf "$TMP_DIR"
     docker image rm "$IMAGE" >/dev/null 2>&1 || true

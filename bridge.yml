@@ -22,6 +22,11 @@ commands:
     description: Test encrypted backups and both restore identity modes
     category: test
     timeoutMs: 300000
+  rootless-docker:
+    run: ["./tests/rootless-docker.sh"]
+    description: Validate the stack against a disposable rootless Docker daemon
+    category: test
+    timeoutMs: 1800000
   non-root-migration:
     run: ["./tests/non-root-migration.sh"]
     description: Test the idempotent stable-UID ownership migration
@@ -49,6 +54,8 @@ agent:
   tasks:
     - Keep CHANGELOG.md and VERSION aligned for every release.
   changelog:
+    - Prepared release 0.0.3 with reconciled state, Alpine runtimes, strict
+      vulnerability gating, rootless Docker coverage, and MIT licensing.
     - Prepared release 0.0.2 with managed configuration, finite checks, tests,
       safer host bindings, and repository secret hygiene.
 

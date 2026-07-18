@@ -6,6 +6,7 @@ ENV_FILE="${HIDDEN_GIT_ENV_FILE:-${ROOT_DIR}/.env}"
 OUTPUT_DIR="${1:-${ROOT_DIR}/release-evidence/$(date -u '+%Y%m%dT%H%M%SZ')}"
 VERSION="$(tr -d '[:space:]' < "$ROOT_DIR/VERSION")"
 TARGETS="${EVIDENCE_TARGETS:-soft-serve tor tor-check maintenance}"
+export VULNERABILITY_POLICY_STRICT="${VULNERABILITY_POLICY_STRICT:-1}"
 
 die() {
     printf 'ERROR: %s\n' "$*" >&2
@@ -28,7 +29,7 @@ require_cmd sha256sum
 docker buildx version >/dev/null 2>&1 || die 'Docker Buildx is required'
 [[ -f "$ENV_FILE" ]] || die "environment file not found: $ENV_FILE"
 
-DEBIAN_IMAGE="$(read_env_value DEBIAN_IMAGE)"
+ALPINE_IMAGE="$(read_env_value ALPINE_IMAGE)"
 GO_IMAGE="$(read_env_value GO_IMAGE)"
 SOFT_SERVE_VERSION="$(read_env_value SOFT_SERVE_VERSION)"
 SOFT_SERVE_WISH_VERSION="$(read_env_value SOFT_SERVE_WISH_VERSION)"
@@ -38,7 +39,7 @@ SOFT_SERVE_X_CRYPTO_VERSION="$(read_env_value SOFT_SERVE_X_CRYPTO_VERSION)"
 SOFT_SERVE_X_NET_VERSION="$(read_env_value SOFT_SERVE_X_NET_VERSION)"
 TRIVY_IMAGE="$(read_env_value TRIVY_IMAGE)"
 BUILDKIT_IMAGE="$(read_env_value BUILDKIT_IMAGE)"
-for value in "$DEBIAN_IMAGE" "$GO_IMAGE" "$TRIVY_IMAGE" "$BUILDKIT_IMAGE"; do
+for value in "$ALPINE_IMAGE" "$GO_IMAGE" "$TRIVY_IMAGE" "$BUILDKIT_IMAGE"; do
     [[ "$value" =~ @sha256:[0-9a-f]{64}$ ]] \
         || die "release evidence requires digest-pinned images; run './run.sh sync-pins'"
 done
@@ -104,7 +105,7 @@ scan_archive() {
 
 for target in $TARGETS; do
     dockerfile=""
-    build_args=(--build-arg "DEBIAN_IMAGE=$DEBIAN_IMAGE")
+    build_args=(--build-arg "ALPINE_IMAGE=$ALPINE_IMAGE")
     case "$target" in
         soft-serve)
             dockerfile='Dockerfile.soft-serve'

@@ -7,7 +7,7 @@ updated_at: 2026-07-18
 issues:
   - id: HG-001
     title: Run both service containers as dedicated non-root users
-    status: in_progress
+    status: closed
     priority: high
     area: security
     reason_deferred: >-
@@ -25,7 +25,15 @@ issues:
       - Stable UIDs 10001 and 10002 and an idempotent ownership migration are implemented.
       - Services run non-root with read-only roots, dropped capabilities, and no-new-privileges.
       - Fresh and upgraded disposable deployments are covered by integration tests.
-      - Rootless Docker or Podman compatibility verification remains open.
+      - A digest-pinned rootless Docker daemon test validates Compose builds,
+        service ownership, stable UIDs, read-only roots, and dropped capabilities.
+    resolution: >-
+      Soft Serve and Tor run as UIDs 10001 and 10002 with read-only roots,
+      no-new-privileges, and all capabilities dropped. Existing state has an
+      explicit idempotent migration and encrypted rollback path. A disposable
+      official rootless Docker daemon now verifies the full bind-mount and
+      Compose deployment path in CI-compatible integration tests.
+    closed_at: 2026-07-18
 
   - id: HG-002
     title: Add encrypted backup, restore, and onion identity rotation workflows
@@ -49,29 +57,29 @@ issues:
 
   - id: HG-008
     title: Reduce and continuously triage high and critical image vulnerabilities
-    status: open
+    status: closed
     priority: high
     area: security
     evidence:
       observed_at: 2026-07-18
       scanner: trivy-0.72.0
-      policy: fail-on-fixable-high-or-critical
+      policy: strict-fail-on-any-high-or-critical
       images:
         soft-serve:
-          critical: 12
-          high: 43
+          critical: 0
+          high: 0
           fixable_high_or_critical: 0
         tor:
-          critical: 3
-          high: 18
+          critical: 0
+          high: 0
           fixable_high_or_critical: 0
         tor-check:
-          critical: 4
-          high: 20
+          critical: 0
+          high: 0
           fixable_high_or_critical: 0
         maintenance:
-          critical: 3
-          high: 18
+          critical: 0
+          high: 0
           fixable_high_or_critical: 0
     reason_deferred: >-
       The first complete evidence pass found no remaining high or critical
@@ -91,11 +99,20 @@ issues:
       - Strict mode can reject any high or critical finding for hardened releases.
       - Sixteen fixable Soft Serve dependency findings were remediated downstream.
       - The unused OpenSSH client was removed from the Soft Serve runtime image.
-      - The current four-image baseline has zero fixable high or critical findings.
+      - All four release runtimes moved to a digest-pinned Alpine 3.23 base.
+      - Strict final evidence reports zero high or critical findings in every image.
+    resolution: >-
+      Replaced the Debian runtimes with minimal Alpine 3.23 images, retained the
+      explicit fixed Soft Serve Go dependency overrides, and removed unused
+      packages. Trivy 0.72.0 strict evidence now reports zero HIGH and zero
+      CRITICAL findings for Soft Serve, Tor, the checker, and maintenance.
+      Release evidence defaults to strict rejection of any future finding at
+      either severity.
+    closed_at: 2026-07-18
 
   - id: HG-009
     title: Reconcile distinct current and legacy deployment state directories
-    status: open
+    status: closed
     priority: high
     area: operations
     evidence:
@@ -120,6 +137,14 @@ issues:
     progress:
       - Doctor warns when both layouts coexist.
       - A secret-safe legacy-state command reports counts, recency, and equality only.
+    resolution: >-
+      Secret-safe SQLite inventory confirmed that neither deployment contained
+      repositories, keys, collaborators, or LFS objects. The configured and
+      newer data/ layout was selected as authoritative. Both layouts were
+      encrypted with age and independently decrypt-and-manifest verified; the
+      legacy state was moved intact below retired-state/ with a reconciliation
+      report, and current state was migrated to the dedicated service UIDs.
+    closed_at: 2026-07-18
 
   - id: HG-003
     title: Support Tor v3 client authorization
@@ -167,7 +192,7 @@ issues:
       - Add an automated update proposal workflow.
       - Record provenance and vulnerability-scan output for releases.
     progress:
-      - Debian and Go release image references are pinned by OCI index digest.
+      - Alpine and Go release image references are pinned by OCI index digest.
       - Dependabot is configured for Docker and GitHub Actions updates.
       - Release provenance and vulnerability scan artifacts are generated for tags.
     resolution: >-
@@ -179,7 +204,7 @@ issues:
 
   - id: HG-006
     title: Select and publish a project license
-    status: open
+    status: closed
     priority: medium
     area: governance
     reason_deferred: >-
@@ -189,6 +214,11 @@ issues:
       - Record the maintainer's explicit license choice.
       - Add the canonical license text at the repository root.
       - Reference the license from the README and release metadata.
+    resolution: >-
+      Selected the permissive MIT License, added its canonical text at LICENSE
+      with copyright attributed to HiddenGit contributors, and documented the
+      license in the README and 0.0.3 release metadata.
+    closed_at: 2026-07-18
 
   - id: HG-007
     title: Add actionable operator UX for security best-practice violations

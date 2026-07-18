@@ -1,10 +1,8 @@
-ARG DEBIAN_IMAGE=debian:trixie-slim@sha256:020c0d20b9880058cbe785a9db107156c3c75c2ac944a6aa7ab59f2add76a7bd
-FROM ${DEBIAN_IMAGE}
+ARG ALPINE_IMAGE=alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
+FROM ${ALPINE_IMAGE}
 
-RUN DEBIAN_FRONTEND=noninteractive apt-get update && \
-    apt-get install -y --no-install-recommends age ca-certificates coreutils tar tini && \
-    rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache age bash ca-certificates coreutils tar tini
 
 COPY --chmod=0755 scripts/maintenance.sh /usr/local/bin/hidden-git-maintenance
 
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/hidden-git-maintenance"]
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/hidden-git-maintenance"]

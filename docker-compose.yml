@@ -8,7 +8,7 @@ services:
       dockerfile: Dockerfile.soft-serve
       args:
         GO_IMAGE: ${GO_IMAGE}
-        DEBIAN_IMAGE: ${DEBIAN_IMAGE}
+        ALPINE_IMAGE: ${ALPINE_IMAGE}
         SOFT_SERVE_VERSION: ${SOFT_SERVE_VERSION}
         SOFT_SERVE_WISH_VERSION: ${SOFT_SERVE_WISH_VERSION:-v2.0.1}
         SOFT_SERVE_GO_GIT_VERSION: ${SOFT_SERVE_GO_GIT_VERSION:-v5.19.0}
@@ -61,7 +61,7 @@ services:
       context: .
       dockerfile: Dockerfile.tor
       args:
-        DEBIAN_IMAGE: ${DEBIAN_IMAGE}
+        ALPINE_IMAGE: ${ALPINE_IMAGE}
     environment:
       ONION_PUBLIC_PORT: ${ONION_PUBLIC_PORT}
       ONION_TARGET_PORT: ${ONION_TARGET_PORT}
@@ -95,7 +95,7 @@ services:
       context: .
       dockerfile: Dockerfile.maintenance
       args:
-        DEBIAN_IMAGE: ${DEBIAN_IMAGE}
+        ALPINE_IMAGE: ${ALPINE_IMAGE}
     environment:
       OUTPUT_UID: ${OUTPUT_UID:-0}
       OUTPUT_GID: ${OUTPUT_GID:-0}

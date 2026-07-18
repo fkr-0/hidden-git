@@ -7,7 +7,7 @@ TMP_DIR="$(mktemp -d /tmp/hidden-git-migration-test.XXXXXX)"
 
 cleanup() {
     docker run --rm -v "$TMP_DIR:/work" \
-        "$(sed -n 's/^DEBIAN_IMAGE=//p' "$ROOT_DIR/env.example")" \
+        "$(sed -n 's/^ALPINE_IMAGE=//p' "$ROOT_DIR/env.example")" \
         sh -lc 'chmod -R a+rwX /work' >/dev/null 2>&1 || true
     rm -rf "$TMP_DIR"
     docker image rm "$IMAGE" >/dev/null 2>&1 || true
@@ -35,7 +35,7 @@ docker run --rm \
     "$IMAGE" migrate-users >/dev/null
 
 owner() {
-    docker run --rm --entrypoint /usr/bin/stat \
+    docker run --rm --entrypoint stat \
         -v "$TMP_DIR/data:/data:ro" "$IMAGE" -c '%u:%g' "$1"
 }
 

@@ -1,5 +1,5 @@
 ARG GO_IMAGE=golang:1.26.5-bookworm@sha256:1ecb7edf62a0408027bd5729dfd6b1b8766e578e8df93995b225dfd0944eb651
-ARG DEBIAN_IMAGE=debian:trixie-slim@sha256:020c0d20b9880058cbe785a9db107156c3c75c2ac944a6aa7ab59f2add76a7bd
+ARG ALPINE_IMAGE=alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
 
 FROM ${GO_IMAGE} AS builder
 ARG SOFT_SERVE_VERSION=v0.11.6
@@ -22,17 +22,15 @@ RUN set -eux; \
       golang.org/x/crypto@${SOFT_SERVE_X_CRYPTO_VERSION} \
       golang.org/x/net@${SOFT_SERVE_X_NET_VERSION}; \
     go mod verify; \
-    go build -trimpath \
+    CGO_ENABLED=0 go build -trimpath \
       -ldflags "-s -w -X main.Version=${SOFT_SERVE_VERSION}" \
       -o /out/soft ./cmd/soft
 
-FROM ${DEBIAN_IMAGE}
+FROM ${ALPINE_IMAGE}
 
-RUN DEBIAN_FRONTEND=noninteractive apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates gettext-base git tini && \
-    rm -rf /var/lib/apt/lists/* && \
-    printf 'hidden-git:x:10001:\n' >> /etc/group && \
-    printf 'hidden-git:x:10001:10001:HiddenGit service:/var/lib/soft-serve:/usr/sbin/nologin\n' >> /etc/passwd && \
+RUN apk add --no-cache ca-certificates gettext-envsubst git tini && \
+    addgroup -g 10001 -S hidden-git && \
+    adduser -u 10001 -S -D -H -h /var/lib/soft-serve -s /sbin/nologin -G hidden-git hidden-git && \
     install -d -o 10001 -g 10001 -m 0700 /var/lib/soft-serve /run/hidden-git
 
 COPY --from=builder /out/soft /usr/local/bin/soft
@@ -49,4 +47,4 @@ WORKDIR /var/lib/soft-serve
 VOLUME ["/var/lib/soft-serve"]
 USER 10001:10001
 
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/hidden-git-soft-serve-entrypoint"]
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/hidden-git-soft-serve-entrypoint"]

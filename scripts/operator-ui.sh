@@ -101,7 +101,7 @@ audit_host_binding() {
 
 audit_image_pinning() {
     local key value failures=0
-    for key in DEBIAN_IMAGE GO_IMAGE TRIVY_IMAGE BUILDKIT_IMAGE; do
+    for key in ALPINE_IMAGE GO_IMAGE TRIVY_IMAGE BUILDKIT_IMAGE DIND_ROOTLESS_IMAGE; do
         value="$(read_env_value "$key")"
         if [[ "$value" =~ @sha256:[0-9a-f]{64}$ ]]; then
             continue
@@ -145,8 +145,8 @@ audit_docker_isolation() {
         ui_status PASS 'Docker daemon isolation' 'rootless mode detected'
     else
         ui_status WARN 'Docker daemon isolation' \
-            'the Docker daemon is not running rootless (HG-001)' \
-            'consider a rootless Docker context; review data ownership before migration'
+            'this host currently uses a rootful daemon; rootless compatibility is tested' \
+            'use a rootless Docker context when host-level daemon isolation is required'
     fi
 
     local ids id configured_user name root_count=0
@@ -157,8 +157,8 @@ audit_docker_isolation() {
         if [[ -z "$configured_user" || "$configured_user" == 0 || "$configured_user" == root ]]; then
             root_count=$((root_count + 1))
             ui_status WARN 'container process user' \
-                "${name:-$id} has no dedicated runtime user (HG-001)" \
-                'keep the host daemon rootless while the ownership migration remains open'
+                "${name:-$id} has no dedicated runtime user" \
+                'recreate the stack from the 0.0.3 images and verify with doctor'
         fi
     done
     if [[ -n "$ids" && $root_count -eq 0 ]]; then
@@ -170,7 +170,7 @@ audit_docker_isolation() {
 
 audit_backup_state() {
     local latest age_days now latest_epoch
-    latest="$(find "$ROOT_DIR/backups" -maxdepth 1 -type f -name 'hidden-git-backup-*.tar.age' \
+    latest="$(find "$ROOT_DIR/backups" -maxdepth 1 -type f -name 'hidden-git-*-backup-*.tar.age' \
         -printf '%T@ %p\n' 2>/dev/null | sort -nr | awk 'NR==1{sub(/^[^ ]+ /, ""); print}')"
     if [[ -z "$latest" ]]; then
         ui_status WARN 'encrypted backup' \

@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-07-18
+
 ### Added
 
 - GitHub Actions coverage for static checks, image builds, and the isolated
@@ -21,17 +23,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - A release-evidence command and tag-only CI artifact containing SLSA v1
   provenance, CycloneDX SBOMs, and vulnerability reports for every image.
 - Safe `sync-pins` migration for existing environment files.
-- A vulnerability policy report that blocks fixable high or critical findings
-  while separately surfacing currently unfixed distro advisories.
+- A vulnerability policy report with strict release gating for every high or
+  critical finding.
 - Dedicated Soft Serve and Tor users with stable UIDs, an idempotent stopped-
   stack migration, read-only root filesystems, dropped capabilities, and
   `no-new-privileges`.
 - Tor readiness now requires control-port-confirmed 100% bootstrap rather than
   treating creation of the onion hostname as network readiness.
-- Release evidence skips the irrelevant Java advisory database for these
-  non-Java images, avoiding an unnecessary large download.
-- Debian gettext helper JAR directories are excluded from Java analysis while
-  OS packages and embedded Go modules remain covered.
 - The pinned Soft Serve source is rebuilt with explicit fixed versions of Wish,
   go-git, go-jose, `x/crypto`, and `x/net`; the binary retains version v0.11.6.
 - Soft Serve readiness uses an SSH-banner TCP probe, allowing the unused
@@ -42,15 +40,43 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   unreadable root-owned databases from being misclassified as fresh installs.
 - Doctor and `legacy-state` identify distinct legacy/current deployments without
   printing database content, private keys, or onion addresses.
+- Secret-safe database inventory, explicit current/legacy backup selection,
+  standalone archive verification, and guarded state reconciliation tooling.
+- A real rootless-Docker integration harness using a digest-pinned daemon image.
+- MIT licensing in the canonical root `LICENSE` file.
 
 ### Changed
 
-- Debian and Go base images are pinned to reviewed multi-architecture OCI
+- Alpine and Go base images are pinned to reviewed multi-architecture OCI
   digests while retaining readable image tags (`HG-005`).
 - GitHub Actions are pinned to immutable full commit SHAs.
 - The vulnerability scanner image is pinned by OCI digest and runs outside the
   workflow action ecosystem.
 - The temporary provenance builder uses a digest-pinned BuildKit worker image.
+- All release runtimes moved from Debian to Alpine 3.23, reducing every image's
+  strict Trivy HIGH/CRITICAL count to zero.
+- Release evidence now enforces strict rejection of every HIGH or CRITICAL
+  finding, including advisories without an advertised fixed version.
+
+### Fixed
+
+- Backup creation no longer mutates ownership or permissions of read-only source
+  state, and restore once again verifies the outer checksum sidecar.
+- Rootless Docker ownership checks now run in the daemon's container namespace
+  rather than comparing misleading host-side remapped numeric IDs.
+- Existing root-owned databases are no longer mistaken for fresh deployments.
+- Backup freshness detects labeled current/legacy archive names.
+- Maintenance image lookup no longer depends on inconsistent Compose image-list
+  output.
+- Removed a duplicated `HG-003` title and duplicate project-map entry.
+
+### Security
+
+- Both distinct local deployments were encrypted and independently verified
+  before the retired one was archived; neither database contained repositories.
+- The reconciliation age identity is mode 0600 and must be moved offline.
+- Rootless Docker, non-root service users, read-only roots, dropped capabilities,
+  and `no-new-privileges` are covered by integration tests.
 
 ## [0.0.2] - 2026-07-18
 

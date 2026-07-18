@@ -15,6 +15,11 @@ die() {
     exit 1
 }
 
+cmd_ownership_ok() {
+    [[ "$(stat -c '%u:%g' "$DATA_ROOT/soft-serve")" == "$SOFT_SERVE_UID:$SOFT_SERVE_GID" ]]
+    [[ "$(stat -c '%u:%g' "$DATA_ROOT/tor")" == "$TOR_UID:$TOR_GID" ]]
+}
+
 cmd_has_state() {
     find "$DATA_ROOT/soft-serve" "$DATA_ROOT/tor" \
         -mindepth 1 \( -type f -o -type l \) -print -quit 2>/dev/null \
@@ -23,7 +28,6 @@ cmd_has_state() {
 
 cmd_migrate_users() {
     cmd_permissions
-    chown "$OUTPUT_UID:$OUTPUT_GID" "$DATA_ROOT" "$BACKUP_ROOT"
     chown -R "$SOFT_SERVE_UID:$SOFT_SERVE_GID" "$DATA_ROOT/soft-serve"
     chown -R "$TOR_UID:$TOR_GID" "$DATA_ROOT/tor"
     chmod 700 "$DATA_ROOT/soft-serve" "$DATA_ROOT/tor"
@@ -37,7 +41,6 @@ chown_output() {
 
 cmd_permissions() {
     mkdir -p "$DATA_ROOT/soft-serve" "$DATA_ROOT/tor" "$BACKUP_ROOT"
-    chown "$OUTPUT_UID:$OUTPUT_GID" "$DATA_ROOT" "$BACKUP_ROOT"
     chmod 700 "$DATA_ROOT" "$DATA_ROOT/soft-serve" "$DATA_ROOT/tor" "$BACKUP_ROOT"
 }
 
@@ -57,14 +60,18 @@ cmd_keygen() {
 
 cmd_backup() {
     local recipient="${BACKUP_RECIPIENT:-}"
+    local label="${BACKUP_LABEL:-current}"
     [[ -n "$recipient" ]] || die 'BACKUP_RECIPIENT is required'
+    [[ "$label" =~ ^[a-z0-9][a-z0-9._-]*$ ]] \
+        || die 'BACKUP_LABEL must contain only lowercase letters, digits, dots, underscores, or hyphens'
     [[ -d "$DATA_ROOT/soft-serve" && -d "$DATA_ROOT/tor" ]] \
         || die 'runtime data directories do not exist'
 
-    cmd_permissions
     local timestamp archive tmp metadata_dir parent data_name
     timestamp="$(date -u '+%Y%m%dT%H%M%SZ')"
-    archive="$BACKUP_ROOT/hidden-git-backup-${timestamp}.tar.age"
+    mkdir -p "$BACKUP_ROOT"
+    chmod 700 "$BACKUP_ROOT"
+    archive="$BACKUP_ROOT/hidden-git-${label}-backup-${timestamp}.tar.age"
     tmp="${archive}.tmp"
     metadata_dir="$(mktemp -d)"
     parent="$(dirname "$DATA_ROOT")"
@@ -80,6 +87,7 @@ cmd_backup() {
     {
         printf 'format=hidden-git-backup-v1\n'
         printf 'created_at=%s\n' "$timestamp"
+        printf 'source_label=%s\n' "$label"
         printf 'identity_policy=preserved-in-archive\n'
     } > "$metadata_dir/METADATA"
 
@@ -99,6 +107,42 @@ cmd_backup() {
     printf '%s\n' "$archive"
 }
 
+verify_checksum_sidecar() {
+    local archive="$1"
+    [[ -f "$archive" ]] || die "backup archive not found: $archive"
+    if [[ -f "${archive}.sha256" ]]; then
+        local expected actual
+        expected="$(awk 'NR==1{print $1}' "${archive}.sha256")"
+        actual="$(sha256sum "$archive" | awk '{print $1}')"
+        [[ -n "$expected" && "$actual" == "$expected" ]] \
+            || die 'backup checksum sidecar verification failed'
+    fi
+}
+
+verify_archive() {
+    local archive="$1"
+    local identity="$2"
+    [[ -f "$identity" ]] || die "age identity not found: $identity"
+    verify_checksum_sidecar "$archive"
+
+    local stage
+    stage="$(mktemp -d)"
+    trap 'rm -rf "${stage:-}"' EXIT
+    age --decrypt -i "$identity" "$archive" | tar -C "$stage" -xf -
+    (cd "$stage" && sha256sum -c MANIFEST.sha256)
+    grep -Fxq 'format=hidden-git-backup-v1' "$stage/METADATA" \
+        || die 'unsupported backup format'
+    printf 'Verified backup: %s\n' "$archive"
+    rm -rf "$stage"
+    trap - EXIT
+}
+
+cmd_verify() {
+    local archive="${VERIFY_ARCHIVE:-}"
+    local identity="${VERIFY_IDENTITY_FILE:-/run/secrets/age-identity}"
+    verify_archive "$archive" "$identity"
+}
+
 directory_is_empty() {
     local path="$1"
     [[ ! -d "$path" ]] || [[ -z "$(find "$path" -mindepth 1 -print -quit)" ]]
@@ -116,14 +160,7 @@ cmd_restore() {
         || die 'restore target data/soft-serve is not empty'
     directory_is_empty "$DATA_ROOT/tor" \
         || die 'restore target data/tor is not empty'
-
-    if [[ -f "${archive}.sha256" ]]; then
-        local expected actual
-        expected="$(awk 'NR==1{print $1}' "${archive}.sha256")"
-        actual="$(sha256sum "$archive" | awk '{print $1}')"
-        [[ -n "$expected" && "$actual" == "$expected" ]] \
-            || die 'backup checksum sidecar verification failed'
-    fi
+    verify_checksum_sidecar "$archive"
 
     local stage
     stage="$(mktemp -d)"
@@ -149,9 +186,11 @@ cmd_restore() {
 case "${1:-}" in
     permissions) cmd_permissions ;;
     migrate-users) cmd_migrate_users ;;
+    ownership-ok) cmd_ownership_ok ;;
     has-state) cmd_has_state ;;
     keygen) shift; cmd_keygen "$@" ;;
     backup) cmd_backup ;;
+    verify) cmd_verify ;;
     restore) cmd_restore ;;
-    *) die 'usage: maintenance.sh {permissions|keygen|backup|restore}' ;;
+    *) die 'usage: maintenance.sh {permissions|migrate-users|ownership-ok|has-state|keygen|backup|verify|restore}' ;;
 esac
