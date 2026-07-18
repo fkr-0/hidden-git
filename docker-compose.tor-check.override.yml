@@ -1,6 +1,10 @@
 services:
   tor-check:
-    image: ${DEBIAN_IMAGE}
+    build:
+      context: .
+      dockerfile: Dockerfile.tor-check
+      args:
+        DEBIAN_IMAGE: ${DEBIAN_IMAGE}
     network_mode: "service:tor"
     depends_on:
       tor:
@@ -8,23 +12,7 @@ services:
     environment:
       ONION_PUBLIC_PORT: ${ONION_PUBLIC_PORT}
       SOFT_SERVE_SSH_USER: ${SOFT_SERVE_SSH_USER}
+      CHECK_TIMEOUT_SECONDS: ${CHECK_TIMEOUT_SECONDS:-180}
     volumes:
       - ./data/tor:/var/lib/tor:ro
-    entrypoint:
-      - /bin/sh
-      - -ec
-      - |
-        apt-get update >/dev/null
-        apt-get install -y --no-install-recommends torsocks openssh-client >/dev/null
-        while :; do
-          host="$$(cat /var/lib/tor/hidden_service/hostname 2>/dev/null || true)"
-          if [ -z "$$host" ]; then
-            sleep 3
-            continue
-          fi
-
-          out="$$(torsocks ssh -o ConnectTimeout=12 -o StrictHostKeyChecking=accept-new -o BatchMode=yes -p "$${ONION_PUBLIC_PORT}" "$${SOFT_SERVE_SSH_USER:-admin}@$$host" help 2>&1 || true)"
-          echo "$$out" | grep -Eq "Permission denied|Connection closed|help|Usage" && exit 0
-          sleep 3
-        done
     profiles: ["check"]

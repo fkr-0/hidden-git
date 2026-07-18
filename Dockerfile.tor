@@ -1,11 +1,12 @@
 ARG DEBIAN_IMAGE=debian:trixie-slim
 FROM ${DEBIAN_IMAGE}
 
-RUN apt-get update && \
+RUN DEBIAN_FRONTEND=noninteractive apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates tor tini gettext-base && \
     rm -rf /var/lib/apt/lists/*
 
 COPY ./soft-serve-hidden-service.torrc.template /etc/tor/torrc.template
+COPY --chmod=0755 scripts/tor-entrypoint.sh /usr/local/bin/hidden-git-tor-entrypoint
 VOLUME ["/var/lib/tor"]
 
-ENTRYPOINT ["/usr/bin/tini", "--", "sh", "-ec", "envsubst < /etc/tor/torrc.template > /etc/tor/torrc && exec tor -f /etc/tor/torrc"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/hidden-git-tor-entrypoint"]

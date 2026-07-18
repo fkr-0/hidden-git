@@ -1,0 +1,26 @@
+# Local configuration and backups
+.env
+.env.*
+.envBackup
+!.env.example
+
+# Runtime state: contains databases, SSH keys, and Tor onion identities
+data/
+soft-serve-data/
+ssoft-serve-data/
+tor-data/
+trunk/
+
+# Local scratch files from early prototypes
+exe
+tst
+tst2
+
+# Generic generated output
+*.db
+*.db-shm
+*.db-wal
+*.log
+.DS_Store
+.ws-bridge/
+

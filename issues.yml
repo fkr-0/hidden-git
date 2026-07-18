@@ -1,0 +1,88 @@
+schema_version: 1
+project: hidden-git
+target_release: 0.0.2
+generated_at: 2026-07-18
+
+issues:
+  - id: HG-001
+    title: Run both service containers as dedicated non-root users
+    status: open
+    priority: high
+    area: security
+    reason_deferred: >-
+      Existing bind-mounted Soft Serve and Tor state may be root-owned or owned
+      by distribution-specific numeric users. A safe change needs an explicit
+      ownership migration and rollback path to avoid making existing instances
+      unbootable.
+    acceptance_criteria:
+      - Document stable UID/GID assignments.
+      - Provide an idempotent ownership migration command.
+      - Verify fresh and upgraded deployments with rootless Docker or Podman.
+
+  - id: HG-002
+    title: Add encrypted backup, restore, and onion identity rotation workflows
+    status: open
+    priority: high
+    area: operations
+    reason_deferred: >-
+      Reliable backup requires coordinated Soft Serve database snapshots,
+      repository storage, SSH host keys, and a policy decision about whether the
+      Tor onion identity should be preserved or rotated.
+    acceptance_criteria:
+      - Produce encrypted, integrity-checked backups.
+      - Test restore into an empty deployment.
+      - Support explicit preserve-identity and rotate-identity modes.
+
+  - id: HG-003
+    title: Support Tor v3 client authorization
+    status: open
+    priority: medium
+    area: privacy
+    reason_deferred: >-
+      Client authorization changes onboarding, secret distribution, revocation,
+      and recovery semantics and therefore needs a designed operator workflow.
+    acceptance_criteria:
+      - Add and revoke authorized clients without rebuilding images.
+      - Keep client credentials outside version control.
+      - Document multi-device recovery and rotation.
+
+  - id: HG-004
+    title: Add CI with real container and Tor integration coverage
+    status: open
+    priority: medium
+    area: testing
+    reason_deferred: >-
+      Static checks are deterministic locally, while a real onion bootstrap test
+      depends on Docker privileges, external Tor network availability, and a
+      longer CI timeout budget.
+    acceptance_criteria:
+      - Build all images in CI.
+      - Start a fresh stack with an ephemeral administrator key.
+      - Verify SSH reachability over the generated onion address.
+      - Preserve useful container logs on failure.
+
+  - id: HG-005
+    title: Pin base images by digest and automate dependency update review
+    status: open
+    priority: medium
+    area: supply-chain
+    reason_deferred: >-
+      Digest pinning improves reproducibility but requires an automated process
+      to refresh architecture-specific digests and review security updates.
+    acceptance_criteria:
+      - Pin all release images by reviewed multi-architecture digest.
+      - Add an automated update proposal workflow.
+      - Record provenance and vulnerability-scan output for releases.
+
+  - id: HG-006
+    title: Select and publish a project license
+    status: open
+    priority: medium
+    area: governance
+    reason_deferred: >-
+      Choosing a license changes the legal permissions granted to downstream
+      users and cannot be inferred safely from the source tree.
+    acceptance_criteria:
+      - Record the maintainer's explicit license choice.
+      - Add the canonical license text at the repository root.
+      - Reference the license from the README and release metadata.

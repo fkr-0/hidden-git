@@ -1,0 +1,34 @@
+version: 1
+name: hidden-git
+description: Soft Serve Git forge exposed through a Tor onion service
+commands:
+  test:
+    run: ["./tests/test.sh"]
+    description: Run static release checks
+    category: test
+    timeoutMs: 120000
+  e2e:
+    run: ["./tests/e2e.sh"]
+    description: Run an isolated fresh-deployment onion SSH integration test
+    category: test
+    timeoutMs: 600000
+  config:
+    run: ["./run.sh", "config"]
+    description: Render and validate the Docker Compose configuration
+    category: lint
+    timeoutMs: 30000
+  build:
+    run: ["./run.sh", "build"]
+    description: Build all release images
+    category: build
+    timeoutMs: 900000
+agent:
+  notes: >-
+    Never commit .env, Soft Serve databases or SSH keys, or Tor hidden-service
+    state. VERSION is the canonical project version.
+  tasks:
+    - Keep CHANGELOG.md and VERSION aligned for every release.
+  changelog:
+    - Prepared release 0.0.2 with managed configuration, finite checks, tests,
+      safer host bindings, and repository secret hygiene.
+

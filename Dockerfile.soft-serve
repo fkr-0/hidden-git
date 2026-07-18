@@ -1,4 +1,4 @@
-ARG GO_IMAGE=golang:1.26.3-bookworm
+ARG GO_IMAGE=golang:1.26.5-bookworm
 ARG DEBIAN_IMAGE=debian:trixie-slim
 
 FROM ${GO_IMAGE} AS builder
@@ -7,22 +7,20 @@ RUN go install github.com/charmbracelet/soft-serve/cmd/soft@${SOFT_SERVE_VERSION
 
 FROM ${DEBIAN_IMAGE}
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates git openssh-client && \
+RUN DEBIAN_FRONTEND=noninteractive apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates gettext-base git openssh-client tini && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /go/bin/soft /usr/local/bin/soft
+COPY soft-serve.config.yaml.template /etc/hidden-git/soft-serve.config.yaml.template
+COPY --chmod=0755 scripts/soft-serve-entrypoint.sh /usr/local/bin/hidden-git-soft-serve-entrypoint
 
 ENV SOFT_SERVE_DATA_PATH=/var/lib/soft-serve
+ENV SOFT_SERVE_NAME=HiddenGit
 ENV SOFT_SERVE_INITIAL_ADMIN_KEYS=
 ENV CI=1
 
 WORKDIR /var/lib/soft-serve
 VOLUME ["/var/lib/soft-serve"]
 
-EXPOSE 23231/tcp
-EXPOSE 23232/tcp
-EXPOSE 23233/tcp
-EXPOSE 9418/tcp
-
-ENTRYPOINT ["/usr/local/bin/soft", "serve"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/hidden-git-soft-serve-entrypoint"]

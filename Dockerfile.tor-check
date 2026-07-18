@@ -1,0 +1,11 @@
+ARG DEBIAN_IMAGE=debian:trixie-slim
+FROM ${DEBIAN_IMAGE}
+
+RUN DEBIAN_FRONTEND=noninteractive apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates coreutils openssh-client torsocks && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --chmod=0755 scripts/tor-check.sh /usr/local/bin/hidden-git-tor-check
+
+ENTRYPOINT ["/usr/local/bin/hidden-git-tor-check"]
+

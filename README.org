@@ -1,121 +1,241 @@
 #+TITLE: HiddenGit
+#+SUBTITLE: Release 0.0.2
 
-HiddenGit is a self-hosted =soft-serve= Git forge published as a Tor onion service.
-This is an experimental setup; for strict security requirements, prefer mature, audited deployments.
+HiddenGit is a small, self-hosted Soft Serve Git forge published as a Tor v3
+onion service. Docker Compose manages the local services; only the generated
+onion SSH endpoint is intended for remote access.
 
-* Goals
-- Expose Git-over-SSH through an onion address.
-- Keep runtime reproducible via Docker and =.env= version pinning.
-- Provide operational checks through =run.sh= with =oniux=.
+This remains an experimental deployment. Review =issues.yml= before treating it
+as a high-assurance service.
 
-* Ownership Notes (Bind Mounts)
-This setup uses local bind mounts:
-- =./data/soft-serve= -> soft-serve data
-- =./data/tor= -> tor hidden-service state
+* Security model
 
-Because Tor and some setup steps run as root in containers, host files under =./data= can become root-owned.
-Practical mitigation options:
-- Pre-create directories and chown to your user before first run.
-- Run =sudo chown -R \"$USER\":\"$USER\" data/= after teardown if ownership drifts.
-- Keep all bind-mounted state isolated under =./data= to avoid polluting repo root.
+- Tor keeps the server's public network location out of the clone URL.
+- Soft Serve authenticates operators and collaborators with SSH public keys.
+- Host-published Soft Serve ports bind to =127.0.0.1= by default.
+- Runtime state under =data/= contains private SSH keys, repositories, the
+  SQLite database, and the Tor onion identity. It must never be committed.
+- A fresh deployment refuses to boot without at least one initial administrator
+  public key.
 
-* Quick Start
-#+begin_src shell
-./run.sh up
-./run.sh status
-./run.sh test
-#+end_src
+The onion address is not itself an access-control mechanism. Configure private
+repositories and collaborators in Soft Serve. Tor v3 client authorization is
+tracked separately in =issues.yml=.
 
-Stop stack:
-#+begin_src shell
-./run.sh down
-#+end_src
+* Requirements
 
-Run one-shot onion SSH connectivity probe via tor network namespace:
-#+begin_src shell
-docker compose --env-file .env -f docker-compose.yml -f docker-compose.tor-check.override.yml run --rm tor-check
-#+end_src
+- Docker Engine with Docker Compose v2
+- Bash, awk, grep, and standard Unix utilities
+- Optional: [[https://arti.torproject.org/related/oniux/][oniux]] for a host-side connectivity check
+- Optional development checks: ShellCheck and yamllint
 
-* run.sh CLI Reference
-Usage:
-#+begin_src shell
-./run.sh <command>
-#+end_src
+* Quick start
 
-Commands:
-- =up= :: Build/start services, then wait until the hidden-service SSH endpoint is connectable through onion routing.
-- =down= :: Stop and remove stack services.
-- =build= :: Build images only.
-- =logs= :: Follow compose logs.
-- =ps= :: Show service status.
-- =status= :: Show service status and onion hostname (if available).
-- =test= :: Validate HTTP and SSH onion connectivity using =oniux=.
-- =restart= :: Stop then start again.
+1. Create local configuration and private state directories:
 
-* Env Configuration (All Settings)
-- =DEBIAN_IMAGE= :: Runtime base image for Tor + soft-serve runtime stage.
-- =GO_IMAGE= :: Build image for compiling soft-serve binary.
-- =SOFT_SERVE_VERSION= :: Soft Serve version to install.
-- =SOFT_SERVE_SSH_PORT= :: soft-serve SSH port.
-- =SOFT_SERVE_HTTP_PORT= :: soft-serve HTTP port.
-- =SOFT_SERVE_STATS_PORT= :: soft-serve metrics/stats port.
-- =SOFT_SERVE_GIT_PORT= :: Git protocol port.
-- =ONION_PUBLIC_PORT= :: Onion-side exposed port.
-- =ONION_TARGET_PORT= :: Internal target port on soft-serve (usually SSH port).
-- =SOFT_SERVE_DATA_PATH= :: Data path inside soft-serve container.
-- =SOFT_SERVE_INITIAL_ADMIN_KEYS= :: Optional admin pubkeys for first boot.
-- =CI= :: Set to =1= by default; keeps runtime in non-interactive mode and avoids TTY-related sluggish behavior in containerized execution.
-- =SOFT_SERVE_SSH_USER= :: SSH username used by readiness checks in =run.sh= (default recommended: =admin=).
+   #+begin_src shell
+   ./run.sh init
+   #+end_src
 
-* Tips / Tricks
+2. Edit =.env= and set a complete SSH public key:
 
-If you do not use ~oniux~, connect to ~tor~ network as you do usually and replace ~oniux~ with ~torsocks~/~torify~ accordingly:
+   #+begin_src conf
+   SOFT_SERVE_INITIAL_ADMIN_KEYS="ssh-ed25519 AAAA... operator@example"
+   #+end_src
 
-** 1) Example ~/.ssh/config
+3. Validate and start:
+
+   #+begin_src shell
+   ./run.sh doctor
+   ./run.sh up
+   #+end_src
+
+4. Print the generated onion hostname and public SSH port:
+
+   #+begin_src shell
+   ./run.sh status
+   #+end_src
+
+5. Stop the stack without deleting persistent state:
+
+   #+begin_src shell
+   ./run.sh down
+   #+end_src
+
+* Operator commands
+
+| Command   | Purpose |
+|-----------+---------|
+| =init=    | Create =.env= with mode 0600 and private runtime directories. |
+| =up=      | Build, start, wait for health, and verify onion SSH access. |
+| =down=    | Stop and remove containers and the project network. |
+| =build=   | Build Soft Serve, Tor, and the reusable Tor checker image. |
+| =logs=    | Follow service logs. |
+| =ps=      | Show Compose service state. |
+| =status=  | Show service state, onion hostname, and onion SSH port. |
+| =test=    | Run the live onion SSH connectivity check. |
+| =config=  | Print the fully interpolated Compose configuration. |
+| =doctor=  | Validate Docker, environment values, directories, and Compose. |
+| =restart= | Stop and start the stack. |
+| =version= | Print the HiddenGit release version. |
+| =help=    | Show command help without requiring Docker or =.env=. |
+
+* Configuration
+
+Copying =env.example= manually is supported, but =./run.sh init= also applies
+safe file permissions.
+
+Set =HIDDEN_GIT_ENV_FILE=/path/to/file= to operate against a non-default
+environment file. Runtime data remains under this checkout's =data/= directory.
+
+Existing pre-0.0.2 environment files remain usable: the service name, public
+URLs, loopback bind address, and check timeout all have safe defaults. Compare
+the local file with =env.example= to adopt the explicit new settings.
+
+** Images and versions
+
+- =HIDDEN_GIT_VERSION= :: Project release version; must match =VERSION=.
+- =DEBIAN_IMAGE= :: Runtime base for Tor, Soft Serve, and the checker.
+- =GO_IMAGE= :: Go builder image.
+- =SOFT_SERVE_VERSION= :: Pinned upstream Soft Serve release.
+
+** Service identity and access
+
+- =SOFT_SERVE_NAME= :: Name shown in the Soft Serve UI.
+- =SOFT_SERVE_INITIAL_ADMIN_KEYS= :: Required administrator SSH public keys on
+  first boot. Existing databases do not require it again.
+- =SOFT_SERVE_SSH_USER= :: Username used only by readiness probes.
+
+** Ports
+
+- =SOFT_SERVE_SSH_PORT= :: Soft Serve SSH listener.
+- =SOFT_SERVE_HTTP_PORT= :: Soft Serve HTTP listener.
+- =SOFT_SERVE_STATS_PORT= :: Soft Serve statistics listener.
+- =SOFT_SERVE_GIT_PORT= :: Native Git protocol listener.
+- =ONION_TARGET_PORT= :: Internal port reached by Tor; must match the SSH port.
+- =ONION_PUBLIC_PORT= :: Port clients use on the onion address.
+- =HOST_BIND_ADDRESS= :: Host address for local port publication. Keep the
+  default =127.0.0.1= unless wider LAN exposure is intentional.
+
+All four Soft Serve listener ports are rendered into a managed runtime config on
+every container start. Existing databases and repositories remain in =data/=.
+
+** Public URLs
+
+Soft Serve displays these values in clone instructions:
+
+- =SOFT_SERVE_SSH_PUBLIC_URL=
+- =SOFT_SERVE_HTTP_PUBLIC_URL=
+- =SOFT_SERVE_GIT_PUBLIC_URL=
+
+The onion hostname is generated at runtime, so update the SSH public URL after
+the first successful start when accurate onion clone hints are desired.
+
+** Runtime and checks
+
+- =SOFT_SERVE_DATA_PATH= :: Absolute data path inside the container.
+- =CI= :: Keeps Soft Serve in non-interactive container mode.
+- =CHECK_TIMEOUT_SECONDS= :: Upper bound for each live onion SSH probe.
+
+* Connecting through Tor
+
+Assume =./run.sh status= reports =example.onion= and port =8002=.
+
+** With oniux
+
 #+begin_src sshconfig
 Host hiddengit
-  HostName <ONIONADDRESS.onion>
-  User <GIT-USER>
-  Port <PORT>
+  HostName example.onion
+  User admin
+  Port 8002
   ProxyCommand oniux nc %h %p
+  IdentityFile ~/.ssh/id_ed25519
+  IdentitiesOnly yes
   StrictHostKeyChecking accept-new
 #+end_src
 
-Note: if your OpenSSH build does not include =nc=, install netcat and keep the same ProxyCommand pattern.
+Then open the Soft Serve TUI:
 
-#+begin_src sh
-ssh hiddengit # connect to softserve tui
+#+begin_src shell
+ssh hiddengit
 #+end_src
 
-** 2) Example .git/config using oniux
-#+begin_src ini
-[core]
-	repositoryformatversion = 0
-	filemode = true
-	bare = false
-	logallrefupdates = true
-	sshCommand = oniux ssh -p<PORT>
+Clone a repository using the same SSH host alias:
 
-[remote "origin"]
-	url = ssh://<GIT-USER>@<ONIONADDRESS.onion>/<REPONAME>.git
-	fetch = +refs/heads/*:refs/remotes/origin/*
+#+begin_src shell
+git clone ssh://hiddengit/OWNER/REPOSITORY.git
 #+end_src
 
-#+begin_src sh
-git pull # with cwd in above git repo should work
+** With torsocks
+
+#+begin_src shell
+torsocks ssh -p 8002 admin@example.onion
 #+end_src
 
-Replace =<ONIONADDRESS.onion>/<REPONAME>/<GIT-USER>/<PORT>= with the relevant actual values.
+* Persistent data and permissions
 
-* Project File Map
-- =docker-compose.yml= :: Main stack (soft-serve + tor hidden service).
-- =docker-compose.tor-check.override.yml= :: Optional one-shot torsocks SSH checker that joins tor container network namespace.
-- =Dockerfile.soft-serve= :: Build soft-serve binary and package runtime.
-- =Dockerfile.tor= :: Tor hidden-service runtime, renders torrc from template.
-- =soft-serve-hidden-service.torrc.template= :: Tor config template with env substitution.
-- =run.sh= :: Operator entrypoint for build/start/status/test.
+| Host path | Contents | Sensitivity |
+|-----------+----------+-------------|
+| =data/soft-serve/= | Repositories, SQLite DB, Soft Serve SSH keys | Secret/private |
+| =data/tor/= | Tor state and persistent onion identity | Secret/private |
 
-* Running on
+Back up both directories together. Do not copy them into release archives or
+bug reports. Containers may currently create files with root or distribution
+service ownership; a non-root migration is tracked as =HG-001=.
+
+* Development and release checks
+
+Run deterministic static checks:
+
+#+begin_src shell
+./tests/test.sh
+#+end_src
+
+Build all images:
+
+#+begin_src shell
+./run.sh build
+#+end_src
+
+The live end-to-end check requires a running stack and Tor bootstrap:
+
+#+begin_src shell
+./run.sh test
+#+end_src
+
+Run a completely isolated fresh-deployment test with generated credentials,
+random local ports, and disposable named volumes:
+
+#+begin_src shell
+./tests/e2e.sh
+#+end_src
+
+This validates database initialization, the generated Soft Serve configuration,
+authenticated local SSH, and authenticated SSH through the onion service without
+touching =./data= or =.env=. Set =KEEP_E2E_ARTIFACTS=1= to retain failure logs.
+
+Release metadata lives in =VERSION= and =CHANGELOG.md=. Deferred larger work is
+kept in =issues.yml=.
+
+* Project map
+
+- =docker-compose.yml= :: Main Soft Serve and Tor stack.
+- =docker-compose.tor-check.override.yml= :: One-shot checker joining Tor's
+  network namespace.
+- =Dockerfile.soft-serve= :: Pinned Soft Serve build and runtime image.
+- =Dockerfile.tor= :: Tor hidden-service runtime.
+- =Dockerfile.tor-check= :: Reusable torsocks/SSH checker image.
+- =.dockerignore= :: Prevents runtime identities, databases, and local
+  configuration from entering Docker build contexts.
+- =soft-serve.config.yaml.template= :: Managed Soft Serve configuration.
+- =soft-serve-hidden-service.torrc.template= :: Tor hidden-service mapping.
+- =scripts/= :: Container entrypoints and checker.
+- =run.sh= :: Operator CLI.
+- =tests/test.sh= :: Static release verification.
+- =issues.yml= :: Deferred implementation and security work.
+
+* Upstream projects
+
 - [[https://www.docker.com/][Docker]]
 - [[https://www.torproject.org/][The Tor Project]]
 - [[https://github.com/charmbracelet/soft-serve][charmbracelet/soft-serve]]

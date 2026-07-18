@@ -1,0 +1,65 @@
+name: "${SOFT_SERVE_NAME}"
+
+log:
+  format: "text"
+  time_format: "2006-01-02 15:04:05"
+
+ssh:
+  enabled: true
+  listen_addr: ":${SOFT_SERVE_SSH_PORT}"
+  public_url: "${SOFT_SERVE_SSH_PUBLIC_URL}"
+  key_path: "${SOFT_SERVE_DATA_PATH}/ssh/soft_serve_host_ed25519"
+  client_key_path: "${SOFT_SERVE_DATA_PATH}/ssh/soft_serve_client_ed25519"
+  max_timeout: 0
+  idle_timeout: 600
+
+git:
+  enabled: true
+  listen_addr: ":${SOFT_SERVE_GIT_PORT}"
+  public_url: "${SOFT_SERVE_GIT_PUBLIC_URL}"
+  max_timeout: 0
+  idle_timeout: 3
+  max_connections: 32
+
+http:
+  enabled: true
+  listen_addr: ":${SOFT_SERVE_HTTP_PORT}"
+  tls_key_path: ""
+  tls_cert_path: ""
+  public_url: "${SOFT_SERVE_HTTP_PUBLIC_URL}"
+  cors:
+    allowed_headers:
+      - "Accept"
+      - "Accept-Language"
+      - "Content-Language"
+      - "Content-Type"
+      - "Origin"
+      - "X-Requested-With"
+      - "User-Agent"
+      - "Authorization"
+      - "Access-Control-Request-Method"
+      - "Access-Control-Allow-Origin"
+    allowed_origins:
+      - "${SOFT_SERVE_HTTP_PUBLIC_URL}"
+    allowed_methods:
+      - "GET"
+      - "HEAD"
+      - "POST"
+      - "PUT"
+      - "OPTIONS"
+
+stats:
+  enabled: true
+  listen_addr: ":${SOFT_SERVE_STATS_PORT}"
+
+db:
+  driver: "sqlite"
+  data_source: "${SOFT_SERVE_DATA_PATH}/soft-serve.db?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
+
+lfs:
+  enabled: true
+  ssh_enabled: false
+
+jobs:
+  mirror_pull: "@every 10m"
+
