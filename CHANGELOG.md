@@ -7,10 +7,15 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
-## [0.0.3] - 2026-07-18
+## [0.0.3] - 2026-07-26
 
 ### Added
 
+- Architecture, roadmap, and release-process documents covering trust
+  boundaries, state ownership, recovery semantics, SemVer policy, release
+  gates, and the path to a stable operator contract.
+- Static validation that the canonical version is valid SemVer, all release
+  metadata agrees, and a CI tag exactly matches `v<VERSION>`.
 - GitHub Actions coverage for static checks, image builds, and the isolated
   authenticated onion SSH end-to-end test (`HG-004`).
 - Dependabot review configuration for Docker and GitHub Actions dependencies.
@@ -47,6 +52,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- `issues.yml` now targets the next `0.1.0` milestone and records the remaining
+  access-control, maintainability, configuration-compatibility, and recovery
+  work after the `0.0.3` baseline.
 - Alpine and Go base images are pinned to reviewed multi-architecture OCI
   digests while retaining readable image tags (`HG-005`).
 - GitHub Actions are pinned to immutable full commit SHAs.
@@ -60,6 +68,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- The rootless-Docker harness stores its disposable inner daemon state in the
+  temporary test workspace instead of the outer container layer, preventing
+  host Docker storage exhaustion during clean image builds.
 - Backup creation no longer mutates ownership or permissions of read-only source
   state, and restore once again verifies the outer checksum sidecar.
 - Rootless Docker ownership checks now run in the daemon's container namespace

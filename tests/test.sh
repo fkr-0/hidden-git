@@ -35,9 +35,23 @@ else
 fi
 
 version="$(tr -d '[:space:]' < VERSION)"
-grep -Fq "## [$version]" CHANGELOG.md || fail "CHANGELOG.md has no release section for $version"
-grep -Fq "HIDDEN_GIT_VERSION=$version" env.example || fail "env.example version differs from VERSION"
-pass 'version consistency'
+semver_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(\+([0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?$'
+[[ "$version" =~ $semver_re ]] || fail "VERSION is not valid SemVer: $version"
+grep -Fq '## [Unreleased]' CHANGELOG.md || fail 'CHANGELOG.md has no Unreleased section'
+[[ "$(grep -Fc "## [$version] -" CHANGELOG.md)" == '1' ]] \
+    || fail "CHANGELOG.md must contain exactly one dated release section for $version"
+grep -Fxq "HIDDEN_GIT_VERSION=$version" env.example \
+    || fail "env.example version differs from VERSION"
+grep -Fxq "#+SUBTITLE: Release $version" README.org \
+    || fail "README release subtitle differs from VERSION"
+if [[ "${GITHUB_REF_TYPE:-}" == 'tag' ]]; then
+    [[ "${GITHUB_REF_NAME:-}" == "v$version" ]] \
+        || fail "release tag ${GITHUB_REF_NAME:-<missing>} does not match v$version"
+fi
+for release_doc in ARCHITECTURE.md ROADMAP.md RELEASING.md; do
+    [[ -s "$release_doc" ]] || fail "release documentation is missing: $release_doc"
+done
+pass 'SemVer and release metadata consistency'
 
 grep -Fq 'MIT License' LICENSE || fail 'canonical MIT license text is missing'
 grep -Fq 'MIT License' README.org || fail 'README does not reference the license'

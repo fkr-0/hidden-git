@@ -34,8 +34,17 @@ tar \
     --exclude=tor-data \
     -C "$ROOT_DIR" -cf - . | tar -C "$TMP_DIR" -xf -
 cp "$ROOT_DIR/env.example" "$TMP_DIR/.env"
-mkdir -p "$TMP_DIR/data/soft-serve" "$TMP_DIR/data/tor" "$TMP_DIR/backups"
-chmod 700 "$TMP_DIR/data" "$TMP_DIR/data/soft-serve" "$TMP_DIR/data/tor" "$TMP_DIR/backups"
+mkdir -p \
+    "$TMP_DIR/data/soft-serve" \
+    "$TMP_DIR/data/tor" \
+    "$TMP_DIR/backups" \
+    "$TMP_DIR/rootless-docker"
+chmod 700 \
+    "$TMP_DIR/data" \
+    "$TMP_DIR/data/soft-serve" \
+    "$TMP_DIR/data/tor" \
+    "$TMP_DIR/backups" \
+    "$TMP_DIR/rootless-docker"
 
 ssh-keygen -q -t ed25519 -N '' -f "$TMP_DIR/admin_key"
 admin_key="$(cat "$TMP_DIR/admin_key.pub")"
@@ -87,6 +96,7 @@ DOCKER_HOST="$OUTER_DOCKER_HOST" docker run -d --privileged \
     -e DOCKER_TLS_CERTDIR= \
     -p 127.0.0.1::2375 \
     -v "$TMP_DIR:$TMP_DIR" \
+    -v "$TMP_DIR/rootless-docker:/home/rootless/.local/share/docker" \
     "$DIND_IMAGE" --host=tcp://0.0.0.0:2375 --tls=false >/dev/null
 
 daemon_port="$(DOCKER_HOST="$OUTER_DOCKER_HOST" docker port "$DAEMON_NAME" 2375/tcp | awk -F: 'NR==1{print $NF}')"

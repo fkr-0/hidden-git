@@ -53,7 +53,11 @@ agent:
     state. VERSION is the canonical project version.
   tasks:
     - Keep CHANGELOG.md and VERSION aligned for every release.
+    - Preserve the architecture invariants documented in ARCHITECTURE.md.
+    - Follow RELEASING.md and do not push or publish without explicit approval.
   changelog:
+    - Finalized release 0.0.3 with architecture and roadmap documentation,
+      explicit SemVer/tag invariants, and a reproducible local release process.
     - Prepared release 0.0.3 with reconciled state, Alpine runtimes, strict
       vulnerability gating, rootless Docker coverage, and MIT licensing.
     - Prepared release 0.0.2 with managed configuration, finite checks, tests,

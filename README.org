@@ -8,6 +8,10 @@ onion SSH endpoint is intended for remote access.
 This remains an experimental deployment. Review =issues.yml= before treating it
 as a high-assurance service.
 
+The system boundaries and state model are documented in =ARCHITECTURE.md=.
+Release sequencing lives in =ROADMAP.md=, and =RELEASING.md= defines the SemVer,
+changelog, validation, commit, and tag contract.
+
 * Security model
 
 - Tor keeps the server's public network location out of the clone URL.
@@ -339,8 +343,9 @@ Release evidence uses strict policy: any HIGH or CRITICAL finding fails the
 release. The Alpine-based 0.0.3 images currently have no findings at either
 severity.
 
-Release metadata lives in =VERSION= and =CHANGELOG.md=. Deferred larger work is
-kept in =issues.yml=.
+Release metadata lives in =VERSION= and =CHANGELOG.md=. =RELEASING.md= defines
+the complete local release gate. Deferred larger work is kept in =issues.yml=
+and sequenced in =ROADMAP.md=.
 
 * Project map
 
@@ -357,6 +362,10 @@ kept in =issues.yml=.
 - =soft-serve-hidden-service.torrc.template= :: Tor hidden-service mapping.
 - =scripts/= :: Container entrypoints and checker.
 - =run.sh= :: Operator CLI.
+- =ARCHITECTURE.md= :: Components, data flows, trust boundaries, invariants,
+  and failure/recovery model.
+- =ROADMAP.md= :: Sequenced release goals and stability criteria.
+- =RELEASING.md= :: SemVer, changelog, validation, commit, and tag procedure.
 - =tests/test.sh= :: Static release verification.
 - =tests/rootless-docker.sh= :: Rootless Docker compatibility integration test.
 - =issues.yml= :: Deferred implementation and security work.

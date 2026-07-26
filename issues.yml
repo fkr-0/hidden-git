@@ -1,8 +1,8 @@
 schema_version: 1
 project: hidden-git
-target_release: 0.0.3
+target_release: 0.1.0
 generated_at: 2026-07-18
-updated_at: 2026-07-18
+updated_at: 2026-07-26
 
 issues:
   - id: HG-001
@@ -34,6 +34,54 @@ issues:
       official rootless Docker daemon now verifies the full bind-mount and
       Compose deployment path in CI-compatible integration tests.
     closed_at: 2026-07-18
+
+  - id: HG-010
+    title: Modularize the operator CLI without changing its public contract
+    status: open
+    priority: medium
+    area: maintainability
+    reason_deferred: >-
+      The single entry point keeps operations discoverable, but run.sh now
+      combines configuration, runtime, connectivity, backup, migration, and
+      release responsibilities. Decomposition must preserve command names,
+      exit statuses, failure ordering, and secret-handling behavior.
+    acceptance_criteria:
+      - Split command families into small sourced libraries with explicit APIs.
+      - Preserve every documented command and exit-status contract.
+      - Add Docker-free unit fixtures for parsing and guard behavior.
+      - Keep shellcheck, integration, migration, and recovery tests passing.
+
+  - id: HG-011
+    title: Define a versioned configuration schema and upgrade contract
+    status: open
+    priority: medium
+    area: compatibility
+    reason_deferred: >-
+      Existing defaults preserve older environment files, but the project does
+      not yet have a machine-readable schema that distinguishes deprecated,
+      removed, unknown, deployment-specific, and release-managed values.
+    acceptance_criteria:
+      - Publish a versioned schema for supported environment values.
+      - Detect unknown, removed, renamed, and invalid values with remediation.
+      - Test upgrades from representative prior release configurations.
+      - Document compatibility and rollback policy for pre-1.0 releases.
+
+  - id: HG-012
+    title: Automate off-host backup verification and recovery drills
+    status: open
+    priority: high
+    area: operations
+    reason_deferred: >-
+      Backup and restore are tested in disposable fixtures, but operational
+      confidence also requires recurring verification of real encrypted
+      archives, off-host storage, freshness objectives, and full recovery
+      drills that do not expose the offline identity.
+    acceptance_criteria:
+      - Add a non-interactive, secret-safe verification command for timers.
+      - Define backup freshness and retention objectives.
+      - Document off-host archive and offline identity storage.
+      - Produce machine-readable drill evidence without secret material.
+      - Exercise preserve and rotate recovery modes in an isolated full stack.
 
   - id: HG-002
     title: Add encrypted backup, restore, and onion identity rotation workflows

@@ -73,6 +73,9 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - name: Verify release tag matches VERSION
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: test "${GITHUB_REF_NAME}" = "v$(tr -d '[:space:]' < VERSION)"
       - name: Prepare release environment
         run: cp env.example .env
       - name: Generate provenance, SBOM, and vulnerability reports
