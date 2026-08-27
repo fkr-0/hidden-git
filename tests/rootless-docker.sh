@@ -40,12 +40,12 @@ mkdir -p \
     "$TMP_DIR/backups" \
     "$TMP_DIR/rootless-docker"
 chmod 755 "$TMP_DIR"
-chmod 700 \
+chmod 777 \
     "$TMP_DIR/data" \
     "$TMP_DIR/data/soft-serve" \
     "$TMP_DIR/data/tor" \
-    "$TMP_DIR/backups" \
-    "$TMP_DIR/rootless-docker"
+    "$TMP_DIR/backups"
+chmod 700 "$TMP_DIR/rootless-docker"
 
 ssh-keygen -q -t ed25519 -N '' -f "$TMP_DIR/admin_key"
 admin_key="$(cat "$TMP_DIR/admin_key.pub")"
@@ -87,16 +87,18 @@ path.chmod(0o600)
 PY
 
 # The pinned dind-rootless image runs its daemon as a non-root user. Runner host
-# UIDs differ across environments, so normalize only the disposable paths that
-# the nested daemon itself must write.
+# UIDs differ across environments, so normalize only the daemon's private Docker
+# state. The shared deployment staging directories remain runner-owned and
+# temporarily writable until migrate-users deliberately establishes service
+# ownership inside the nested rootless daemon.
 dind_uid="$(DOCKER_HOST="$OUTER_DOCKER_HOST" docker run --rm --entrypoint id "$DIND_IMAGE" -u)"
 [[ "$dind_uid" =~ ^[0-9]+$ ]]
 DOCKER_HOST="$OUTER_DOCKER_HOST" docker run --rm \
     -v "$TMP_DIR:/work" \
     "$ALPINE_IMAGE" sh -ec '
         uid="$1"
-        chown "$uid:$uid" /work/rootless-docker /work/data /work/data/soft-serve /work/data/tor /work/backups
-        chmod 700 /work/rootless-docker /work/data /work/data/soft-serve /work/data/tor /work/backups
+        chown "$uid:$uid" /work/rootless-docker
+        chmod 700 /work/rootless-docker
     ' sh "$dind_uid"
 
 DOCKER_HOST="$OUTER_DOCKER_HOST" docker run -d --privileged \
