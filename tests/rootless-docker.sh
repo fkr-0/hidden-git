@@ -39,6 +39,7 @@ mkdir -p \
     "$TMP_DIR/data/tor" \
     "$TMP_DIR/backups" \
     "$TMP_DIR/rootless-docker"
+chmod 755 "$TMP_DIR"
 chmod 700 \
     "$TMP_DIR/data" \
     "$TMP_DIR/data/soft-serve" \
@@ -85,6 +86,19 @@ path.write_text("\n".join(lines) + "\n")
 path.chmod(0o600)
 PY
 
+# The pinned dind-rootless image runs its daemon as a non-root user. Runner host
+# UIDs differ across environments, so normalize only the disposable paths that
+# the nested daemon itself must write.
+dind_uid="$(DOCKER_HOST="$OUTER_DOCKER_HOST" docker run --rm --entrypoint id "$DIND_IMAGE" -u)"
+[[ "$dind_uid" =~ ^[0-9]+$ ]]
+DOCKER_HOST="$OUTER_DOCKER_HOST" docker run --rm \
+    -v "$TMP_DIR:/work" \
+    "$ALPINE_IMAGE" sh -ec '
+        uid="$1"
+        chown "$uid:$uid" /work/rootless-docker /work/data /work/data/soft-serve /work/data/tor /work/backups
+        chmod 700 /work/rootless-docker /work/data /work/data/soft-serve /work/data/tor /work/backups
+    ' sh "$dind_uid"
+
 DOCKER_HOST="$OUTER_DOCKER_HOST" docker run -d --privileged \
     --name "$DAEMON_NAME" \
     -e DOCKER_TLS_CERTDIR= \
@@ -97,13 +111,24 @@ daemon_port="$(DOCKER_HOST="$OUTER_DOCKER_HOST" docker port "$DAEMON_NAME" 2375/
 [[ "$daemon_port" =~ ^[0-9]+$ ]]
 ROOTLESS_DOCKER_HOST="tcp://127.0.0.1:${daemon_port}"
 
-for _ in $(seq 1 60); do
+daemon_ready=0
+for _ in $(seq 1 90); do
     if DOCKER_HOST="$ROOTLESS_DOCKER_HOST" NO_PROXY=127.0.0.1 docker info >/dev/null 2>&1; then
+        daemon_ready=1
+        break
+    fi
+    if [[ "$(DOCKER_HOST="$OUTER_DOCKER_HOST" docker inspect --format '{{.State.Running}}' "$DAEMON_NAME" 2>/dev/null || true)" != true ]]; then
         break
     fi
     sleep 1
 done
-DOCKER_HOST="$ROOTLESS_DOCKER_HOST" NO_PROXY=127.0.0.1 docker info >/dev/null
+if [[ "$daemon_ready" != 1 ]]; then
+    printf '%s\n' 'rootless Docker daemon failed to become ready; diagnostics follow' >&2
+    DOCKER_HOST="$OUTER_DOCKER_HOST" docker inspect "$DAEMON_NAME" >&2 || true
+    DOCKER_HOST="$OUTER_DOCKER_HOST" docker logs "$DAEMON_NAME" >&2 || true
+    exit 1
+fi
+
 DOCKER_HOST="$ROOTLESS_DOCKER_HOST" NO_PROXY=127.0.0.1 \
     docker info --format '{{json .SecurityOptions}}' | grep -q rootless
 

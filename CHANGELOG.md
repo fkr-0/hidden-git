@@ -7,6 +7,25 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-27
+
+### Changed
+
+- CI now uses the pinned `actions/checkout` v6 runtime instead of the Node-20
+  based v4 action.
+
+### Fixed
+
+- CI creates operational `.env` files with mode 0600 so the schema's secret-file
+  permission invariant is enforced consistently on GitHub-hosted runners.
+- Port validation uses explicit conditionals accepted by current ShellCheck.
+- The rootless-Docker harness normalizes ownership of only its disposable nested
+  daemon state to the pinned dind-rootless image's runtime UID, making the test
+  independent of the GitHub runner host UID and retaining daemon diagnostics on
+  startup failure.
+- `v0.1.0` remains an immutable failed-CI tag; no GitHub Release was published
+  from it. This patch release supersedes that candidate without moving the tag.
+
 ## [0.1.0] - 2026-08-27
 
 ### Added

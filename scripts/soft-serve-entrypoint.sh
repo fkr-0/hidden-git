@@ -12,7 +12,9 @@ validate_port() {
     case "$value" in
         ''|*[!0-9]*) fail "$name must be an integer, got: $value" ;;
     esac
-    [ "$value" -ge 1 ] && [ "$value" -le 65535 ] || fail "$name must be between 1 and 65535"
+    if [ "$value" -lt 1 ] || [ "$value" -gt 65535 ]; then
+        fail "$name must be between 1 and 65535"
+    fi
 }
 
 SOFT_SERVE_DATA_PATH=/var/lib/soft-serve

@@ -2,7 +2,7 @@
 
 ## Status
 
-HiddenGit `0.1.0` is the current release line. It adds schema-v1 configuration convergence, a smaller SSH-only network surface, Soft Serve v0.12.2 security updates, stale-config E2E protection, and release-bound documentation for `hiddengit.fkr.dev` on top of the `0.0.3` hardening baseline.
+HiddenGit `0.1.1` is the current release line. It adds schema-v1 configuration convergence, a smaller SSH-only network surface, Soft Serve v0.12.2 security updates, stale-config E2E protection, release-bound documentation for `hiddengit.fkr.dev`, and CI portability fixes on top of the `0.0.3` hardening baseline.
 
 The project remains pre-`1.0.0`: interfaces and deployment procedures may still change when a change materially improves security, recovery, or operability.
 
