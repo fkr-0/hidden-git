@@ -17,8 +17,9 @@ ENV_FILE="${TMP_DIR}/e2e.env"
 OVERRIDE_FILE="${TMP_DIR}/e2e.override.yml"
 LOG_FILE="${TMP_DIR}/compose.log"
 KEEP_ARTIFACTS="${KEEP_E2E_ARTIFACTS:-0}"
-E2E_CHECK_TIMEOUT_SECONDS="${E2E_CHECK_TIMEOUT_SECONDS:-360}"
+E2E_CHECK_TIMEOUT_SECONDS="${E2E_CHECK_TIMEOUT_SECONDS:-300}"
 E2E_SSH_ATTEMPT_TIMEOUT_SECONDS="${E2E_SSH_ATTEMPT_TIMEOUT_SECONDS:-45}"
+E2E_ONION_CHECK_ATTEMPTS="${E2E_ONION_CHECK_ATTEMPTS:-2}"
 
 require_cmd() {
     command -v "$1" >/dev/null 2>&1 || {
@@ -206,7 +207,41 @@ printf '%s\n' "$local_output" | grep -Eq 'Soft Serve|Usage:|Available Commands:'
     exit 1
 }
 
-"${compose[@]}" --profile check run --rm --build tor-check >/dev/null
+case "$E2E_ONION_CHECK_ATTEMPTS" in
+    ''|*[!0-9]*)
+        printf 'invalid E2E_ONION_CHECK_ATTEMPTS: %s\n' "$E2E_ONION_CHECK_ATTEMPTS" >&2
+        exit 2
+        ;;
+esac
+(( E2E_ONION_CHECK_ATTEMPTS > 0 )) || {
+    printf 'E2E_ONION_CHECK_ATTEMPTS must be positive\n' >&2
+    exit 2
+}
+
+# A hosted runner can occasionally reach a healthy local Tor process while its
+# public circuit remains stalled below 100% bootstrap. Keep real onion SSH as a
+# mandatory assertion, but allow one bounded fresh-Tor retry rather than turning
+# transient public-network bootstrap into a false product regression.
+"${compose[@]}" --profile check build tor-check >/dev/null
+onion_check_ok=0
+for ((attempt = 1; attempt <= E2E_ONION_CHECK_ATTEMPTS; attempt++)); do
+    if "${compose[@]}" --profile check run --rm tor-check; then
+        onion_check_ok=1
+        break
+    fi
+
+    "${compose[@]}" logs --no-color tor >"${TMP_DIR}/tor-attempt-${attempt}.log" 2>&1 || true
+    if (( attempt < E2E_ONION_CHECK_ATTEMPTS )); then
+        printf 'onion SSH attempt %d/%d failed; recreating Tor for one bounded retry\n' \
+            "$attempt" "$E2E_ONION_CHECK_ATTEMPTS" >&2
+        "${compose[@]}" up -d --force-recreate --wait tor
+    fi
+done
+(( onion_check_ok == 1 )) || {
+    printf 'authenticated onion SSH failed after %d bounded attempt(s)\n' \
+        "$E2E_ONION_CHECK_ATTEMPTS" >&2
+    exit 1
+}
 
 # Recreate both services and verify managed configuration remains authoritative.
 first_config_hash="$(printf '%s' "$managed_config" | sha256sum | awk '{print $1}')"
