@@ -15,9 +15,15 @@ ALPINE_IMAGE="$(read_example ALPINE_IMAGE)"
 
 cleanup() {
     DOCKER_HOST="$OUTER_DOCKER_HOST" docker rm -f "$DAEMON_NAME" >/dev/null 2>&1 || true
-    DOCKER_HOST="$OUTER_DOCKER_HOST" docker run --rm -v "$TMP_DIR:/work" "$ALPINE_IMAGE" \
-        sh -lc 'chmod -R a+rwX /work' >/dev/null 2>&1 || true
-    rm -rf "$TMP_DIR"
+    # Rootless containerd overlay snapshots can contain entries that the host
+    # runner cannot unlink directly even after the nested daemon exits. Remove
+    # this disposable test tree through the outer privileged daemon instead of
+    # letting EXIT cleanup turn a successful compatibility test into a failure.
+    DOCKER_HOST="$OUTER_DOCKER_HOST" docker run --rm --privileged \
+        -v "$TMP_DIR:/work" "$ALPINE_IMAGE" \
+        sh -ec 'find /work -mindepth 1 -delete' >/dev/null 2>&1 || true
+    rmdir "$TMP_DIR" >/dev/null 2>&1 || true
+    return 0
 }
 trap cleanup EXIT
 
