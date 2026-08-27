@@ -1,13 +1,13 @@
-ARG GO_IMAGE=golang:1.26.5-bookworm@sha256:1ecb7edf62a0408027bd5729dfd6b1b8766e578e8df93995b225dfd0944eb651
+ARG GO_IMAGE=golang:1.26.7-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514
 ARG ALPINE_IMAGE=alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
 
 FROM ${GO_IMAGE} AS builder
-ARG SOFT_SERVE_VERSION=v0.11.6
-ARG SOFT_SERVE_WISH_VERSION=v2.0.1
-ARG SOFT_SERVE_GO_GIT_VERSION=v5.19.0
+ARG SOFT_SERVE_VERSION=v0.12.2
+ARG SOFT_SERVE_WISH_VERSION=v2.0.3
+ARG SOFT_SERVE_GO_GIT_VERSION=v5.19.2
 ARG SOFT_SERVE_GO_JOSE_VERSION=v3.0.5
-ARG SOFT_SERVE_X_CRYPTO_VERSION=v0.52.0
-ARG SOFT_SERVE_X_NET_VERSION=v0.55.0
+ARG SOFT_SERVE_X_CRYPTO_VERSION=v0.54.0
+ARG SOFT_SERVE_X_NET_VERSION=v0.57.0
 RUN set -eux; \
     export GOMODCACHE=/tmp/gomodcache; \
     mkdir -p /src /out; \
@@ -28,7 +28,8 @@ RUN set -eux; \
 
 FROM ${ALPINE_IMAGE}
 
-RUN apk add --no-cache ca-certificates gettext-envsubst git tini && \
+RUN apk upgrade --no-cache && \
+    apk add --no-cache ca-certificates gettext-envsubst git tini && \
     addgroup -g 10001 -S hidden-git && \
     adduser -u 10001 -S -D -H -h /var/lib/soft-serve -s /sbin/nologin -G hidden-git hidden-git && \
     install -d -o 10001 -g 10001 -m 0700 /var/lib/soft-serve /run/hidden-git

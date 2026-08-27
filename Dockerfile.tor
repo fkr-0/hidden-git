@@ -1,7 +1,8 @@
 ARG ALPINE_IMAGE=alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
 FROM ${ALPINE_IMAGE}
 
-RUN apk add --no-cache bash ca-certificates coreutils gettext-envsubst tini tor && \
+RUN apk upgrade --no-cache && \
+    apk add --no-cache bash ca-certificates coreutils gettext-envsubst tini tor && \
     addgroup -g 10002 -S hidden-tor && \
     adduser -u 10002 -S -D -H -h /var/lib/tor -s /sbin/nologin -G hidden-tor hidden-tor && \
     install -d -o 10002 -g 10002 -m 0700 /var/lib/tor /run/hidden-git

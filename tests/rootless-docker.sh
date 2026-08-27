@@ -62,18 +62,12 @@ def free_port() -> int:
 
 path = Path(sys.argv[1])
 admin_key = sys.argv[2]
-ports = [free_port() for _ in range(5)]
+ports = [free_port() for _ in range(2)]
 updates = {
     "SOFT_SERVE_INITIAL_ADMIN_KEYS": admin_key,
-    "SOFT_SERVE_SSH_PORT": str(ports[0]),
-    "SOFT_SERVE_HTTP_PORT": str(ports[1]),
-    "SOFT_SERVE_STATS_PORT": str(ports[2]),
-    "SOFT_SERVE_GIT_PORT": str(ports[3]),
-    "ONION_TARGET_PORT": str(ports[0]),
-    "ONION_PUBLIC_PORT": str(ports[4]),
-    "SOFT_SERVE_SSH_PUBLIC_URL": f"ssh://localhost:{ports[0]}",
-    "SOFT_SERVE_HTTP_PUBLIC_URL": f"http://localhost:{ports[1]}",
-    "SOFT_SERVE_GIT_PUBLIC_URL": f"git://localhost:{ports[3]}",
+    "LOCAL_SSH_PORT": str(ports[0]),
+    "ONION_PUBLIC_PORT": str(ports[1]),
+    "SOFT_SERVE_SSH_PUBLIC_URL": "",
 }
 lines = []
 seen = set()

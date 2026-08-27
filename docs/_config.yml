@@ -1,0 +1,14 @@
+title: HiddenGit
+description: An opinionated private Git forge over Tor and SSH
+url: https://hiddengit.fkr.dev
+baseurl: ""
+markdown: kramdown
+permalink: pretty
+strict_front_matter: true
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
+exclude:
+  - README.md

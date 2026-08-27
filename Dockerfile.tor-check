@@ -1,7 +1,8 @@
 ARG ALPINE_IMAGE=alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
 FROM ${ALPINE_IMAGE}
 
-RUN apk add --no-cache ca-certificates coreutils openssh-client torsocks
+RUN apk upgrade --no-cache && \
+    apk add --no-cache ca-certificates coreutils openssh-client torsocks
 
 COPY --chmod=0755 scripts/tor-check.sh /usr/local/bin/hidden-git-tor-check
 

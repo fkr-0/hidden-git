@@ -6,6 +6,8 @@ COMPOSE_FILE="${ROOT_DIR}/docker-compose.yml"
 COMPOSE_TOR_CHECK_OVERRIDE="${ROOT_DIR}/docker-compose.tor-check.override.yml"
 ENV_FILE="${HIDDEN_GIT_ENV_FILE:-${ROOT_DIR}/.env}"
 VERSION_FILE="${ROOT_DIR}/VERSION"
+CONFIG_SCHEMA="${ROOT_DIR}/config/schema.json"
+CONFIG_CTL="${ROOT_DIR}/scripts/configctl.py"
 COMPOSE=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
 COMPOSE_CHECK=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" -f "${COMPOSE_TOR_CHECK_OVERRIDE}")
 COMPOSE_MAINTENANCE=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" --profile maintenance)
@@ -160,10 +162,14 @@ require_cmd() {
     command -v "$1" >/dev/null 2>&1 || fail "missing required command: $1"
 }
 
+require_env_file() {
+    [[ -f "${ENV_FILE}" ]] || fail "environment file not found at ${ENV_FILE}; run './run.sh init' first"
+}
+
 require_runtime() {
+    require_env_file
     require_cmd docker
     docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required"
-    [[ -f "${ENV_FILE}" ]] || fail "environment file not found at ${ENV_FILE}; run './run.sh init' first"
 }
 
 has_oniux() {
@@ -204,33 +210,11 @@ validate_port() {
 }
 
 validate_environment() {
-    local name value
-    for name in \
-        SOFT_SERVE_SSH_PORT \
-        SOFT_SERVE_HTTP_PORT \
-        SOFT_SERVE_STATS_PORT \
-        SOFT_SERVE_GIT_PORT \
-        ONION_TARGET_PORT \
-        ONION_PUBLIC_PORT; do
-        value="$(read_env_value "$name")"
-        [[ -n "$value" ]] || fail "$name is missing from .env"
-        validate_port "$name" "$value"
-    done
-
-    value="$(read_env_value CHECK_TIMEOUT_SECONDS)"
-    if [[ -n "$value" ]]; then
-        validate_positive_integer CHECK_TIMEOUT_SECONDS "$value"
+    require_cmd python3
+    if ! python3 "$CONFIG_CTL" --env "$ENV_FILE" --schema "$CONFIG_SCHEMA" \
+        --template "$ROOT_DIR/env.example" check; then
+        fail "configuration is not canonical; run './run.sh config migrate' for a secret-safe preview"
     fi
-
-    local ssh_port onion_target data_path
-    ssh_port="$(read_env_value SOFT_SERVE_SSH_PORT)"
-    onion_target="$(read_env_value ONION_TARGET_PORT)"
-    [[ "$ssh_port" == "$onion_target" ]] \
-        || fail "ONION_TARGET_PORT must match SOFT_SERVE_SSH_PORT"
-
-    data_path="$(read_env_value SOFT_SERVE_DATA_PATH)"
-    [[ "$data_path" == /* ]] || fail "SOFT_SERVE_DATA_PATH must be absolute"
-
 }
 
 validate_first_boot_admin() {
@@ -405,11 +389,12 @@ cmd_ps() {
 
 cmd_status() {
     require_runtime
+    validate_environment
     "${COMPOSE[@]}" ps
     local host onion_port ssh_port ssh_user
     host="$(tor_hostname | tr -d '\r\n')"
     onion_port="$(read_env_value ONION_PUBLIC_PORT)"
-    ssh_port="$(read_env_value SOFT_SERVE_SSH_PORT)"
+    ssh_port="$(read_env_value LOCAL_SSH_PORT)"
     ssh_user="$(read_env_value SOFT_SERVE_SSH_USER)"
     [[ -n "$ssh_user" ]] || ssh_user='admin'
     if [[ -n "$host" ]]; then
@@ -440,9 +425,35 @@ cmd_test() {
 }
 
 cmd_config() {
-    require_runtime
-    validate_environment
-    "${COMPOSE_CHECK[@]}" --profile check config
+    local sub="${1:-render}"
+    case "$sub" in
+        render)
+            [[ $# -le 1 ]] || fail "usage: ./run.sh config [render|check|migrate [--apply]]"
+            require_runtime
+            validate_environment
+            "${COMPOSE_CHECK[@]}" --profile check config
+            ;;
+        check)
+            [[ $# -eq 1 ]] || fail "usage: ./run.sh config check"
+            require_env_file
+            require_cmd python3
+            python3 "$CONFIG_CTL" --env "$ENV_FILE" --schema "$CONFIG_SCHEMA" \
+                --template "$ROOT_DIR/env.example" check
+            ;;
+        migrate)
+            shift
+            [[ $# -le 1 ]] || fail "usage: ./run.sh config migrate [--apply]"
+            [[ $# -eq 0 || "${1:-}" == '--apply' ]] \
+                || fail "usage: ./run.sh config migrate [--apply]"
+            require_env_file
+            require_cmd python3
+            local args=(--env "$ENV_FILE" --schema "$CONFIG_SCHEMA" \
+                --template "$ROOT_DIR/env.example" migrate)
+            [[ $# -eq 0 ]] || args+=(--apply)
+            python3 "$CONFIG_CTL" "${args[@]}"
+            ;;
+        *) fail "usage: ./run.sh config [render|check|migrate [--apply]]" ;;
+    esac
 }
 
 cmd_doctor() {
@@ -605,7 +616,7 @@ cmd_issues() {
         END { emit() }
     ' "$ROOT_DIR/issues.yml"
     printf '%s\n' '────────────────────────────────────────────────────────────────────'
-    printf '%s\n' 'All 0.0.3 release blockers are closed.'
+    printf '%s\n' 'All 0.1.0 configuration-contract release blockers are closed.'
     printf '%s\n' 'HG-003 remains an optional defense-in-depth feature for a later release.'
 }
 
@@ -786,7 +797,12 @@ Commands:
   ps        Show service status
   status    Show service status, onion hostname, and public SSH port
   test      Verify live onion SSH access
-  config    Render the fully interpolated Compose configuration
+  config [render]
+            Validate schema and render the fully interpolated Compose configuration
+  config check
+            Validate the versioned .env schema without Docker or mutation
+  config migrate [--apply]
+            Preview legacy normalization; --apply writes an atomic mode-0600 migration with rollback copy
   doctor    Validate configuration and show actionable best-practice findings
   doctor --strict
             Fail when any best-practice warning remains
@@ -831,7 +847,7 @@ main() {
         ps) cmd_ps ;;
         status) cmd_status ;;
         test) cmd_test ;;
-        config) cmd_config ;;
+        config) shift; cmd_config "$@" ;;
         doctor) shift; cmd_doctor "$@" ;;
         fix-permissions) cmd_fix_permissions ;;
         sync-pins) cmd_sync_pins ;;

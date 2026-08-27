@@ -7,6 +7,80 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-27
+
+### Added
+
+- Versioned `HIDDEN_GIT_CONFIG_VERSION=1` environment contract in
+  `config/schema.json`, classifying user intent, bootstrap-only values,
+  release-managed pins, advanced overrides, diagnostics/recovery values,
+  internal constants, and migration-only legacy keys (`HG-011`).
+- Docker-free `config check` plus preview-first `config migrate [--apply]` with
+  duplicate/unknown-key rejection, secret-safe diffs, atomic replacement,
+  mode-0600 rollback copies, and explicit second-apply idempotency tests.
+- Upgrade fixtures for representative legacy ports, inline comments, quoting,
+  duplicate and typo keys, ambiguous SSH/Tor targets, and canonical no-op
+  convergence.
+- A release documentation site with hands-on deployment, collaborator, upgrade,
+  backup/recovery tutorials; operator how-tos; config/command/network/state
+  reference; architecture/security/config/release explanations; extension
+  guidance; contributor/testing/documentation guides; and durable developer
+  notes.
+- Release-triggered GitHub Pages workflow for `hiddengit.fkr.dev`. A published
+  GitHub Release is checked out by exact tag, verified against `v<VERSION>`,
+  rebuilt with pinned Pages actions, and deployed through the `github-pages`
+  environment. Manual dispatch exists only as an operator recovery/preview path.
+- Documentation assembler that republishes canonical root architecture,
+  roadmap, changelog, security, release, development, and developer-note records
+  from the exact tag alongside the public machine-readable config schema.
+
+### Changed
+
+- HiddenGit now exposes an SSH-only default service profile: fixed internal SSH
+  `23231`, host-facing `LOCAL_SSH_PORT`, derived Tor target
+  `soft-serve:23231`, disabled HTTP and native `git://`, container-loopback-only
+  stats, and disabled LFS/SSH-LFS.
+- Internal Soft Serve ports, `ONION_TARGET_PORT`, `SOFT_SERVE_DATA_PATH`, and
+  container `CI` mode are no longer deployment configuration. Historical forms
+  are accepted only as explicit migration inputs.
+- Public SSH clone hints derive from `LOCAL_SSH_PORT` when empty while retaining
+  an explicit `ssh://` override for intentionally different proxy/Tor endpoints.
+- Soft Serve moves from v0.11.6 to v0.12.2. Explicit Go dependency versions are
+  aligned with the reviewed v0.12.2 selected module graph rather than carrying
+  the older release's overrides forward blindly.
+- The Go builder moves to the current 1.26 patch release (`1.26.7`), and every
+  Alpine runtime upgrades installed base packages during the image build so
+  fixed security updates are not stranded in an older immutable base layer.
+- `sync-pins` remains release-pin synchronization and is deliberately separate
+  from schema migration; it preserves deployment intent without stamping an old
+  config as current.
+
+### Fixed
+
+- Eliminated the remaining configuration split-brain class where `run.sh` could
+  read the first duplicate `.env` assignment while Docker Compose used the last.
+- Eliminated independent Soft Serve/Tor internal SSH port settings instead of
+  relying on an equality check to keep them synchronized.
+- Stats no longer widens Soft Serve's localhost-style default to the entire
+  Compose network.
+- E2E now seeds a conflicting historical persistent Soft Serve `config.yaml`
+  and proves generated `/run` config, real sockets, Docker host publication,
+  Tor mapping, and recreate behavior remain authoritative.
+
+### Security
+
+- Updated to Soft Serve v0.12.2 so application-level fixes released in
+  v0.12.0-v0.12.2 are present rather than relying only on transitive dependency
+  overrides.
+- Reduced the default remotely/locally reachable protocol surface to
+  authenticated SSH; HTTP, native `git://`, and LFS paths require a separately
+  reviewed extension before exposure.
+- Configuration migration refuses ambiguity before mutation and never prints
+  values classified as secret-bearing.
+- GitHub Pages build jobs remain read-only; only the deploy job receives
+  `pages:write` and OIDC permission, and every third-party workflow action is
+  pinned to a full commit SHA.
+
 ## [0.0.3] - 2026-07-26
 
 ### Added

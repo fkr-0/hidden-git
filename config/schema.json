@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "config_version_key": "HIDDEN_GIT_CONFIG_VERSION",
+  "current_config_version": "1",
+  "internal": {
+    "soft_serve_data_path": "/var/lib/soft-serve",
+    "soft_serve_ssh_port": 23231,
+    "soft_serve_http_port": 23232,
+    "soft_serve_stats_port": 23233,
+    "soft_serve_git_port": 9418,
+    "tor_target_port": 23231,
+    "ci": "1"
+  },
+  "keys": {
+    "HIDDEN_GIT_CONFIG_VERSION": {"kind": "schema", "type": "const", "value": "1", "required": true},
+    "HIDDEN_GIT_VERSION": {"kind": "release-managed", "type": "semver", "required": true},
+    "ALPINE_IMAGE": {"kind": "release-managed", "type": "image-digest", "required": true},
+    "GO_IMAGE": {"kind": "release-managed", "type": "image-digest", "required": true},
+    "SOFT_SERVE_VERSION": {"kind": "release-managed", "type": "version-tag", "required": true},
+    "SOFT_SERVE_WISH_VERSION": {"kind": "release-managed", "type": "version-tag", "required": true},
+    "SOFT_SERVE_GO_GIT_VERSION": {"kind": "release-managed", "type": "version-tag", "required": true},
+    "SOFT_SERVE_GO_JOSE_VERSION": {"kind": "release-managed", "type": "version-tag", "required": true},
+    "SOFT_SERVE_X_CRYPTO_VERSION": {"kind": "release-managed", "type": "version-tag", "required": true},
+    "SOFT_SERVE_X_NET_VERSION": {"kind": "release-managed", "type": "version-tag", "required": true},
+    "TRIVY_IMAGE": {"kind": "release-managed", "type": "image-digest", "required": true},
+    "BUILDKIT_IMAGE": {"kind": "release-managed", "type": "image-digest", "required": true},
+    "DIND_ROOTLESS_IMAGE": {"kind": "release-managed", "type": "image-digest", "required": true},
+    "SOFT_SERVE_NAME": {"kind": "user-intent", "type": "nonempty", "required": true},
+    "SOFT_SERVE_INITIAL_ADMIN_KEYS": {"kind": "bootstrap-only", "type": "optional", "required": true, "secret": true},
+    "ONION_PUBLIC_PORT": {"kind": "user-intent", "type": "port", "required": true},
+    "LOCAL_SSH_PORT": {"kind": "user-intent", "type": "port", "required": true},
+    "HOST_BIND_ADDRESS": {"kind": "advanced-override", "type": "bind-address", "required": true},
+    "SOFT_SERVE_SSH_PUBLIC_URL": {"kind": "advanced-override", "type": "optional-ssh-url", "required": true},
+    "SOFT_SERVE_SSH_USER": {"kind": "diagnostic", "type": "nonempty", "required": true},
+    "CHECK_TIMEOUT_SECONDS": {"kind": "diagnostic", "type": "positive-integer", "required": true},
+    "BACKUP_RECIPIENT": {"kind": "recovery", "type": "optional", "required": true},
+    "BACKUP_IDENTITY_FILE": {"kind": "recovery", "type": "optional", "required": true, "secret": true}
+  },
+  "legacy_keys": {
+    "SOFT_SERVE_SSH_PORT": {"action": "map-local-ssh", "default": "23231"},
+    "SOFT_SERVE_HTTP_PORT": {"action": "drop-aux-port", "default": "23232"},
+    "SOFT_SERVE_STATS_PORT": {"action": "drop-aux-port", "default": "23233"},
+    "SOFT_SERVE_GIT_PORT": {"action": "drop-aux-port", "default": "9418"},
+    "ONION_TARGET_PORT": {"action": "validate-and-drop-target", "default": "23231"},
+    "SOFT_SERVE_DATA_PATH": {"action": "validate-and-drop-constant", "default": "/var/lib/soft-serve"},
+    "CI": {"action": "validate-and-drop-constant", "default": "1"},
+    "SOFT_SERVE_HTTP_PUBLIC_URL": {"action": "drop-aux-url", "default": "http://localhost:23232"},
+    "SOFT_SERVE_GIT_PUBLIC_URL": {"action": "drop-aux-url", "default": "git://localhost:9418"},
+    "DEBIAN_IMAGE": {"action": "drop-retired-release-key", "default": ""}
+  }
+}

@@ -15,25 +15,17 @@ validate_port() {
     [ "$value" -ge 1 ] && [ "$value" -le 65535 ] || fail "$name must be between 1 and 65535"
 }
 
-: "${SOFT_SERVE_DATA_PATH:=/var/lib/soft-serve}"
+SOFT_SERVE_DATA_PATH=/var/lib/soft-serve
+SOFT_SERVE_INTERNAL_SSH_PORT=23231
 : "${SOFT_SERVE_NAME:=HiddenGit}"
-: "${SOFT_SERVE_SSH_PORT:=23231}"
-: "${SOFT_SERVE_HTTP_PORT:=23232}"
-: "${SOFT_SERVE_STATS_PORT:=23233}"
-: "${SOFT_SERVE_GIT_PORT:=9418}"
-: "${SOFT_SERVE_SSH_PUBLIC_URL:=ssh://localhost:${SOFT_SERVE_SSH_PORT}}"
-: "${SOFT_SERVE_HTTP_PUBLIC_URL:=http://localhost:${SOFT_SERVE_HTTP_PORT}}"
-: "${SOFT_SERVE_GIT_PUBLIC_URL:=git://localhost:${SOFT_SERVE_GIT_PORT}}"
+: "${LOCAL_SSH_PORT:=23231}"
+validate_port LOCAL_SSH_PORT "$LOCAL_SSH_PORT"
 
-validate_port SOFT_SERVE_SSH_PORT "$SOFT_SERVE_SSH_PORT"
-validate_port SOFT_SERVE_HTTP_PORT "$SOFT_SERVE_HTTP_PORT"
-validate_port SOFT_SERVE_STATS_PORT "$SOFT_SERVE_STATS_PORT"
-validate_port SOFT_SERVE_GIT_PORT "$SOFT_SERVE_GIT_PORT"
-
-case "$SOFT_SERVE_DATA_PATH" in
-    /*) ;;
-    *) fail "SOFT_SERVE_DATA_PATH must be absolute" ;;
-esac
+# The clone hint is intentionally a public/host-facing value. It is not used to
+# choose the container listener. Explicit proxy/onion URLs remain supported.
+if [ -z "${SOFT_SERVE_SSH_PUBLIC_URL:-}" ]; then
+    SOFT_SERVE_SSH_PUBLIC_URL="ssh://localhost:${LOCAL_SSH_PORT}"
+fi
 
 umask 077
 mkdir -p "$SOFT_SERVE_DATA_PATH/ssh" /run/hidden-git
@@ -42,13 +34,20 @@ if [ ! -s "$SOFT_SERVE_DATA_PATH/soft-serve.db" ] && [ -z "${SOFT_SERVE_INITIAL_
     fail "SOFT_SERVE_INITIAL_ADMIN_KEYS must contain at least one SSH public key on first boot"
 fi
 
-export SOFT_SERVE_DATA_PATH SOFT_SERVE_NAME
-export SOFT_SERVE_SSH_PORT SOFT_SERVE_HTTP_PORT SOFT_SERVE_STATS_PORT SOFT_SERVE_GIT_PORT
-export SOFT_SERVE_SSH_PUBLIC_URL SOFT_SERVE_HTTP_PUBLIC_URL SOFT_SERVE_GIT_PUBLIC_URL
+export SOFT_SERVE_NAME SOFT_SERVE_SSH_PUBLIC_URL
 
 config_path=/run/hidden-git/soft-serve.config.yaml
-envsubst < /etc/hidden-git/soft-serve.config.yaml.template > "$config_path"
+# Only product-level presentation values are substituted. Listener addresses,
+# persistence paths, service enablement, and the Tor target are managed constants.
+# shellcheck disable=SC2016
+envsubst '${SOFT_SERVE_NAME} ${SOFT_SERVE_SSH_PUBLIC_URL}' \
+    < /etc/hidden-git/soft-serve.config.yaml.template \
+    > "$config_path"
 export SOFT_SERVE_CONFIG_LOCATION="$config_path"
 
-exec /usr/local/bin/soft serve
+# Keep an explicit invariant check beside the launch path. The health check and
+# Tor configuration use this same managed endpoint.
+grep -Fq "listen_addr: \":${SOFT_SERVE_INTERNAL_SSH_PORT}\"" "$config_path" \
+    || fail "managed SSH listener is missing from generated Soft Serve config"
 
+exec /usr/local/bin/soft serve

@@ -158,7 +158,7 @@ audit_docker_isolation() {
             root_count=$((root_count + 1))
             ui_status WARN 'container process user' \
                 "${name:-$id} has no dedicated runtime user" \
-                'recreate the stack from the 0.0.3 images and verify with doctor'
+                'recreate the stack from the current release images and verify with doctor'
         fi
     done
     if [[ -n "$ids" && $root_count -eq 0 ]]; then

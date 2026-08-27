@@ -1,0 +1,86 @@
+name: Release documentation
+
+"on":
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to preview/publish (defaults to the selected ref)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hidden-git-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build release documentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out the released source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.ref || github.ref }}
+          fetch-depth: 0
+
+      - name: Verify release metadata
+        if: github.event_name == 'release'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < VERSION)"
+          test "${{ github.event.release.tag_name }}" = "v${version}"
+          test "$(git rev-parse HEAD)" = "$(git rev-list -n 1 "v${version}")"
+
+      - name: Run static release and documentation checks
+        run: ./tests/test.sh
+
+      - name: Prepare documentation source
+        run: ./scripts/prepare-docs-site.sh .docs-site
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b  # v5
+
+      - name: Build Jekyll site
+        uses: actions/jekyll-build-pages@44a6e6beabd48582f863aeeb6cb2151cc1716697  # v1
+        with:
+          source: ./.docs-site
+          destination: ./_site
+
+      - name: Verify release site
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s _site/index.html
+          test -s _site/project/changelog.html
+          test -s _site/project/roadmap.html
+          test ! -e _site/.env
+          test ! -d _site/data
+          test ! -d _site/backups
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b  # v4
+        with:
+          path: ./_site
+
+  deploy:
+    name: Deploy release documentation
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e  # v4

@@ -5,17 +5,24 @@ hardening, key management, encrypted backups, or a reviewed threat model.
 
 ## Check the deployment
 
-Run `./run.sh doctor` before starting or upgrading the stack. It distinguishes
-invalid configuration from risky-but-valid choices and prints a concrete fix
-for every warning. Use `./run.sh doctor --strict` in release reviews and
-automation when warnings should fail the check.
+Run `./run.sh config check` before Compose and `./run.sh doctor` before starting
+or upgrading the stack. Schema validation rejects duplicate, unknown, stale,
+malformed, and release-pin-drifted configuration before different consumers can
+interpret it differently. `doctor` distinguishes invalid configuration from
+risky-but-valid runtime choices and prints a concrete fix for every warning.
+Use `./run.sh doctor --strict` in release reviews and automation when warnings
+should fail the check.
 
 The audit covers secret permissions, loopback-only publication, immutable
 dependency references, administrator-key posture, Docker isolation, explicit
 container users, and encrypted-backup freshness.
 
 Use `./run.sh sync-pins` to adopt reviewed release and scanner digests while
-preserving deployment-specific ports, keys, names, and URLs.
+preserving deployment intent. It is not a schema migration. For a historical
+`.env`, first use `./run.sh config migrate` to preview the secret-safe transform;
+`--apply` creates a private rollback copy and atomically converges only the
+declarative environment file. Ambiguous inputs fail before mutation, and a
+second apply must be a no-op.
 
 `./run.sh fix-permissions` repairs local file and directory modes without
 deleting or rewriting runtime content.
@@ -43,7 +50,22 @@ If `doctor` reports legacy runtime directories, use `./run.sh legacy-state`.
 It prints only file counts, recency, and same/different identity results. Never
 merge or delete distinct databases or onion identities without verified backups.
 
-## Known limitations
+## Network exposure and known limitations
+
+The default product profile intentionally exposes authenticated SSH only:
+
+- Soft Serve SSH is fixed at internal `:23231`;
+- the host maps loopback `LOCAL_SSH_PORT` to internal `23231`;
+- Tor maps `ONION_PUBLIC_PORT` to `soft-serve:23231`;
+- HTTP and native `git://` are disabled;
+- LFS and SSH LFS are disabled;
+- stats is bound only to `127.0.0.1:23233` inside the Soft Serve container.
+
+Widening `HOST_BIND_ADDRESS` or enabling an auxiliary protocol is an advanced
+security decision, not normal port configuration, and requires its own threat
+model and positive/negative reachability tests.
+
+Known limitations:
 
 - The host operator may still choose a rootful Docker daemon. The release test
   suite also validates the complete Compose path against rootless Docker.
@@ -67,12 +89,28 @@ OS packages and embedded Go modules remain included in both the SBOM and
 vulnerability reports. Release runtimes use a digest-pinned Alpine base to keep
 the package surface small.
 
-When the pinned Soft Serve release contains a dependency with an available
-security fix, the builder downloads the checksummed upstream module source and
-applies only explicitly versioned `go get` overrides before compiling. The
-upstream release version remains embedded in the binary and every override is
-recorded in build provenance.
+Release 0.1.0 targets Soft Serve v0.12.2 so the
+application-level security fixes delivered in v0.12.0-v0.12.2 are included. The
+explicit Go dependency versions are aligned to the selected v0.12.2 upstream
+module graph at review time rather than carrying v0.11.6-era overrides forward
+blindly. Future Soft Serve upgrades must repeat that source/module/security
+review; dependency overrides are not a substitute for an upstream application
+fix.
 
-The Soft Serve healthcheck validates the service's SSH banner directly. No SSH
-client is installed in that runtime image, reducing package and vulnerability
-surface without changing authenticated operator access from the host.
+Every override remains explicitly versioned and recorded in build provenance.
+
+The Soft Serve healthcheck validates the service's managed internal SSH banner
+on `127.0.0.1:23231` directly. No SSH client is installed in that runtime image,
+reducing package and vulnerability surface without changing authenticated
+operator access from the host.
+
+## Documentation publication security
+
+The Pages build job has read-only repository permission and assembles only
+tracked public documentation plus `config/schema.json`. It explicitly verifies
+that `.env`, `data/`, and `backups/` are absent from the site artifact. Only the
+separate deploy job receives `pages:write` and OIDC permission through the
+`github-pages` environment, and every Pages action is pinned to a full commit
+SHA. The custom-domain repository setting and DNS are separate administrator
+actions. The custom Actions-based Pages workflow intentionally carries no
+repository `CNAME` file.

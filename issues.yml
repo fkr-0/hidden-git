@@ -1,8 +1,8 @@
 schema_version: 1
 project: hidden-git
-target_release: 0.1.0
+target_release: 0.2.0
 generated_at: 2026-07-18
-updated_at: 2026-07-26
+updated_at: 2026-08-27
 
 issues:
   - id: HG-001
@@ -53,7 +53,7 @@ issues:
 
   - id: HG-011
     title: Define a versioned configuration schema and upgrade contract
-    status: open
+    status: closed
     priority: medium
     area: compatibility
     reason_deferred: >-
@@ -65,6 +65,14 @@ issues:
       - Detect unknown, removed, renamed, and invalid values with remediation.
       - Test upgrades from representative prior release configurations.
       - Document compatibility and rollback policy for pre-1.0 releases.
+    resolution: >-
+      HiddenGit 0.1.0 introduces HIDDEN_GIT_CONFIG_VERSION=1 and a
+      machine-readable schema, rejects duplicate and unknown current keys,
+      provides secret-safe preview-first legacy migration with an atomic private
+      rollback copy, preserves legacy custom SSH host-port intent while fixing
+      internal topology, and verifies exact second-apply idempotency with
+      representative upgrade fixtures.
+    closed_at: 2026-08-27
 
   - id: HG-012
     title: Automate off-host backup verification and recovery drills

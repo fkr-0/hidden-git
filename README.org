@@ -1,22 +1,26 @@
 #+TITLE: HiddenGit
-#+SUBTITLE: Release 0.0.3
+#+SUBTITLE: Release 0.1.0
 
 HiddenGit is a small, self-hosted Soft Serve Git forge published as a Tor v3
-onion service. Docker Compose manages the local services; only the generated
-onion SSH endpoint is intended for remote access.
+onion service. Docker Compose manages the local services; the default product
+profile exposes authenticated SSH only. HTTP, native =git://=, and LFS are
+disabled; statistics remain container-loopback only.
 
 This remains an experimental deployment. Review =issues.yml= before treating it
 as a high-assurance service.
 
-The system boundaries and state model are documented in =ARCHITECTURE.md=.
-Release sequencing lives in =ROADMAP.md=, and =RELEASING.md= defines the SemVer,
-changelog, validation, commit, and tag contract.
+The full operator/developer documentation is published from exact release tags
+at [[https://hiddengit.fkr.dev][hiddengit.fkr.dev]]. The system boundaries and state model are documented in
+=ARCHITECTURE.md=. Release sequencing lives in =ROADMAP.md=, and =RELEASING.md=
+defines the SemVer, changelog, validation, commit, tag, hosted-release, and
+release-documentation contract.
 
 * Security model
 
 - Tor keeps the server's public network location out of the clone URL.
 - Soft Serve authenticates operators and collaborators with SSH public keys.
-- Host-published Soft Serve ports bind to =127.0.0.1= by default.
+- The only default host-published Soft Serve endpoint is SSH; it binds to
+  =127.0.0.1= by default and maps =LOCAL_SSH_PORT= to fixed internal =23231=.
 - Runtime state under =data/= contains private SSH keys, repositories, the
   SQLite database, and the Tor onion identity. It must never be committed.
 - A fresh deployment refuses to boot without at least one initial administrator
@@ -47,9 +51,10 @@ tracked separately in =issues.yml=.
    SOFT_SERVE_INITIAL_ADMIN_KEYS="ssh-ed25519 AAAA... operator@example"
    #+end_src
 
-3. Validate and start:
+3. Validate the versioned configuration, audit posture, and start:
 
    #+begin_src shell
+   ./run.sh config check
    ./run.sh doctor
    ./run.sh up
    #+end_src
@@ -78,8 +83,11 @@ tracked separately in =issues.yml=.
 | =ps=      | Show Compose service state. |
 | =status=  | Show service state, onion hostname, and onion SSH port. |
 | =test=    | Run the live onion SSH connectivity check. |
-| =config=  | Print the fully interpolated Compose configuration. |
-| =doctor=  | Validate Docker, environment values, directories, and Compose. |
+| =config= / =config render= | Validate schema and print the interpolated Compose configuration. |
+| =config check= | Validate the versioned =.env= schema without Docker or mutation. |
+| =config migrate= | Preview a secret-safe legacy-to-current configuration migration. |
+| =config migrate --apply= | Atomically apply migration with a mode-0600 rollback copy; second apply is a no-op. |
+| =doctor=  | Validate Docker, environment values, directories, Compose, and best-practice posture. |
 | =doctor --strict= | Treat every best-practice warning as a failure. |
 | =fix-permissions= | Restrict local environment, data, and backup modes. |
 | =sync-pins= | Update reviewed release references without changing local ports or keys. |
@@ -106,9 +114,12 @@ safe file permissions.
 Set =HIDDEN_GIT_ENV_FILE=/path/to/file= to operate against a non-default
 environment file. Runtime data remains under this checkout's =data/= directory.
 
-Existing pre-0.0.2 environment files remain usable: the service name, public
-URLs, loopback bind address, and check timeout all have safe defaults. Compare
-the local file with =env.example= to adopt the explicit new settings.
+Configuration is versioned independently from the software release by
+=HIDDEN_GIT_CONFIG_VERSION=. Current files must pass =./run.sh config check=.
+Older environment files are migration inputs rather than silently compatible
+Compose inputs: preview them with =./run.sh config migrate= and apply only after
+review with =./run.sh config migrate --apply=. Unknown, duplicate, malformed,
+and ambiguous values fail before Compose can interpret them differently.
 
 ** Images and versions
 
@@ -116,10 +127,11 @@ the local file with =env.example= to adopt the explicit new settings.
 - =ALPINE_IMAGE= :: Minimal runtime base for every release image, pinned by
   multi-architecture OCI digest.
 - =GO_IMAGE= :: Go builder image, pinned by multi-architecture OCI digest.
-- =SOFT_SERVE_VERSION= :: Pinned upstream Soft Serve release.
-- =SOFT_SERVE_*_VERSION= :: Explicit security-only dependency overrides applied
-  to the pinned upstream source when an upstream release has not yet absorbed
-  available vulnerability fixes.
+- =SOFT_SERVE_VERSION= :: Pinned upstream Soft Serve release; current release
+  source targets =v0.12.2=.
+- =SOFT_SERVE_*_VERSION= :: Explicit reviewed dependency versions aligned with
+  the selected upstream Soft Serve graph. They are release-managed, not normal
+  deployment knobs.
 - =TRIVY_IMAGE= :: Digest-pinned scanner used only for release evidence.
 - =BUILDKIT_IMAGE= :: Digest-pinned BuildKit worker used for provenance builds.
 
@@ -130,36 +142,32 @@ the local file with =env.example= to adopt the explicit new settings.
   first boot. Existing databases do not require it again.
 - =SOFT_SERVE_SSH_USER= :: Username used only by readiness probes.
 
-** Ports
+** Network intent
 
-- =SOFT_SERVE_SSH_PORT= :: Soft Serve SSH listener.
-- =SOFT_SERVE_HTTP_PORT= :: Soft Serve HTTP listener.
-- =SOFT_SERVE_STATS_PORT= :: Soft Serve statistics listener.
-- =SOFT_SERVE_GIT_PORT= :: Native Git protocol listener.
-- =ONION_TARGET_PORT= :: Internal port reached by Tor; must match the SSH port.
-- =ONION_PUBLIC_PORT= :: Port clients use on the onion address.
-- =HOST_BIND_ADDRESS= :: Host address for local port publication. Keep the
-  default =127.0.0.1= unless wider LAN exposure is intentional.
+- =LOCAL_SSH_PORT= :: Loopback-facing host SSH port. Docker maps it to managed
+  internal Soft Serve SSH =23231=.
+- =ONION_PUBLIC_PORT= :: Virtual port clients use on the onion address. Tor maps
+  it to the same managed internal SSH endpoint =soft-serve:23231=.
+- =HOST_BIND_ADDRESS= :: Host address for the local SSH publication. Keep the
+  default =127.0.0.1= unless wider LAN exposure is intentional and reviewed.
+- =SOFT_SERVE_SSH_PUBLIC_URL= :: Optional =ssh://= clone-hint override. Empty
+  derives =ssh://localhost:<LOCAL_SSH_PORT>=. Public URL and listener are not
+  forced equal because proxies/Tor may intentionally differ.
 
-All four Soft Serve listener ports are rendered into a managed runtime config on
-every container start. Existing databases and repositories remain in =data/=.
-
-** Public URLs
-
-Soft Serve displays these values in clone instructions:
-
-- =SOFT_SERVE_SSH_PUBLIC_URL=
-- =SOFT_SERVE_HTTP_PUBLIC_URL=
-- =SOFT_SERVE_GIT_PUBLIC_URL=
-
-The onion hostname is generated at runtime, so update the SSH public URL after
-the first successful start when accurate onion clone hints are desired.
+Internal ports are no longer public configuration. The data path, Tor target,
+CI mode, Soft Serve SSH/HTTP/stats/Git ports, protocol enablement, and LFS policy
+are managed product invariants. The default generated config enables SSH on
+=:23231=, disables HTTP and native =git://=, keeps stats on
+=127.0.0.1:23233=, and disables LFS/SSH-LFS.
 
 ** Runtime and checks
 
-- =SOFT_SERVE_DATA_PATH= :: Absolute data path inside the container.
-- =CI= :: Keeps Soft Serve in non-interactive container mode.
-- =CHECK_TIMEOUT_SECONDS= :: Upper bound for each live onion SSH probe.
+- =SOFT_SERVE_SSH_USER= :: Username used only by readiness probes.
+- =CHECK_TIMEOUT_SECONDS= :: Upper bound for each live onion SSH verification.
+
+The machine-readable contract is =config/schema.json=. Legacy
+=SOFT_SERVE_*_PORT=, =ONION_TARGET_PORT=, =SOFT_SERVE_DATA_PATH=, and =CI=
+values are handled only by =config migrate=; they are not current settings.
 
 ** Backups
 
@@ -173,13 +181,15 @@ mutable dependency references, stale backups, or a non-rootless Docker daemon.
 =./run.sh doctor --strict= turns warnings into a non-zero exit status.
 
 Existing deployments can adopt reviewed version and digest references without
-changing local ports, keys, or public URLs:
+changing deployment intent:
 
 #+begin_src sh
 ./run.sh sync-pins
 #+end_src
 
-The previous environment file is retained as a mode-0600 timestamped backup.
+=sync-pins= is deliberately separate from schema migration. It creates a private
+rollback copy and refreshes release-managed inputs, but does not pretend an old
+schema became current. Use =config migrate= for that transformation.
 
 * Encrypted backup and restore
 
@@ -340,8 +350,8 @@ vulnerability reports. The bulky OCI archives are discarded after extraction
 unless =KEEP_EVIDENCE_IMAGES=1= is set.
 
 Release evidence uses strict policy: any HIGH or CRITICAL finding fails the
-release. The Alpine-based 0.0.3 images currently have no findings at either
-severity.
+release. Every candidate release must regenerate this evidence for its exact
+image and dependency set before tagging.
 
 Release metadata lives in =VERSION= and =CHANGELOG.md=. =RELEASING.md= defines
 the complete local release gate. Deferred larger work is kept in =issues.yml=
