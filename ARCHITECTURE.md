@@ -2,7 +2,7 @@
 
 ## Purpose
 
-HiddenGit is a small self-hosted Git forge that exposes Soft Serve's SSH interface through a Tor v3 onion service. Release `0.1.1` targets a narrow operating model:
+HiddenGit is a small self-hosted Git forge that exposes Soft Serve's SSH interface through a Tor v3 onion service. Release `0.1.2` targets a narrow operating model:
 
 - one Docker Compose deployment;
 - one persistent Soft Serve state tree;

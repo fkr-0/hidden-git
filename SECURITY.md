@@ -89,7 +89,7 @@ OS packages and embedded Go modules remain included in both the SBOM and
 vulnerability reports. Release runtimes use a digest-pinned Alpine base to keep
 the package surface small.
 
-Release 0.1.1 targets Soft Serve v0.12.2 so the
+Release 0.1.2 targets Soft Serve v0.12.2 so the
 application-level security fixes delivered in v0.12.0-v0.12.2 are included. The
 explicit Go dependency versions are aligned to the selected v0.12.2 upstream
 module graph at review time rather than carrying v0.11.6-era overrides forward

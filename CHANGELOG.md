@@ -7,6 +7,30 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-08-27
+
+### Changed
+
+- GitHub-hosted rootless qualification now installs a narrow Ubuntu 24.04+
+  AppArmor allowance for the pinned RootlessKit binary when the host kernel
+  restricts unprivileged user namespaces.
+- CI artifact uploads use the pinned Node-24 `actions/upload-artifact` v6
+  runtime.
+
+### Fixed
+
+- The rootless-Docker harness now handles distinct host-runner and nested
+  dind-rootless UIDs across bind-mounted deployment state while still proving
+  the final dedicated `10001`/`10002` service ownership migration.
+- Rootless test cleanup removes disposable containerd/overlay state through the
+  outer privileged test daemon, so a successful compatibility test cannot be
+  turned into a CI failure by host-side unlink permissions.
+- Authenticated onion E2E keeps a real onion SSH success mandatory while
+  allowing one bounded fresh-Tor retry when a hosted runner's public Tor circuit
+  stalls during bootstrap. Per-attempt Tor diagnostics are retained on failure.
+- `v0.1.1` remains an immutable failed-CI tag; no GitHub Release was published
+  from it. This patch release supersedes that candidate without moving the tag.
+
 ## [0.1.1] - 2026-08-27
 
 ### Changed
