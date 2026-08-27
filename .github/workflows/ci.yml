@@ -53,7 +53,7 @@ jobs:
         run: ./tests/e2e.sh
       - name: Upload integration diagnostics
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6
         with:
           name: hidden-git-e2e-diagnostics
           path: ${{ runner.temp }}/hidden-git-e2e
@@ -64,6 +64,23 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+      - name: Allow RootlessKit user namespaces on Ubuntu 24.04+
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || printf '0')" == "1" ]]; then
+            cat <<'EOF' | sudo tee /etc/apparmor.d/usr.local.bin.rootlesskit >/dev/null
+          abi <abi/4.0>,
+          include <tunables/global>
+
+          /usr/local/bin/rootlesskit flags=(unconfined) {
+            userns,
+
+            include if exists <local/usr.local.bin.rootlesskit>
+          }
+          EOF
+            sudo apparmor_parser -r /etc/apparmor.d/usr.local.bin.rootlesskit
+          fi
       - name: Validate rootless Docker compatibility
         run: ./tests/rootless-docker.sh
 
@@ -83,7 +100,7 @@ jobs:
           VULNERABILITY_POLICY_STRICT: "1"
         run: ./run.sh evidence release-evidence
       - name: Upload release evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6
         with:
           name: hidden-git-release-evidence-${{ github.ref_name }}
           path: release-evidence
