@@ -7,6 +7,25 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-08-27
+
+### Changed
+
+- Pages publication now uses pinned Node-24 action majors for
+  `configure-pages`, `upload-pages-artifact`, and `deploy-pages`.
+
+### Fixed
+
+- Release-site verification now follows the site's configured `pretty`
+  permalinks (`project/<page>/index.html`) instead of expecting flat `.html`
+  output from Jekyll.
+- Pages qualification now requires `assets/release-version.txt` and verifies it
+  byte-normalizes to the checked-out `VERSION` before an artifact can deploy.
+- The published `v0.1.2` source was recovered through the workflow's explicit
+  manual recovery path and successfully deployed to `hiddengit.fkr.dev` after
+  its original release-triggered verification step failed. `v0.1.3` carries the
+  corrected workflow so normal release publication is self-contained again.
+
 ## [0.1.2] - 2026-08-27
 
 ### Changed

@@ -1,5 +1,5 @@
 #+TITLE: HiddenGit
-#+SUBTITLE: Release 0.1.2
+#+SUBTITLE: Release 0.1.3
 
 HiddenGit is a small, self-hosted Soft Serve Git forge published as a Tor v3
 onion service. Docker Compose manages the local services; the default product
