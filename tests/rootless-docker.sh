@@ -87,18 +87,19 @@ path.chmod(0o600)
 PY
 
 # The pinned dind-rootless image runs its daemon as a non-root user. Runner host
-# UIDs differ across environments, so normalize only the daemon's private Docker
-# state. The shared deployment staging directories remain runner-owned and
-# temporarily writable until migrate-users deliberately establishes service
-# ownership inside the nested rootless daemon.
+# UIDs differ across environments. Transfer the nested daemon's private state and
+# deployment bind directories to that UID, but keep the deployment directories
+# temporarily world-writable so the host runner can execute the pre-migration
+# mkdir/chmod checks. migrate-users then establishes the actual service owners.
 dind_uid="$(DOCKER_HOST="$OUTER_DOCKER_HOST" docker run --rm --entrypoint id "$DIND_IMAGE" -u)"
 [[ "$dind_uid" =~ ^[0-9]+$ ]]
 DOCKER_HOST="$OUTER_DOCKER_HOST" docker run --rm \
     -v "$TMP_DIR:/work" \
     "$ALPINE_IMAGE" sh -ec '
         uid="$1"
-        chown "$uid:$uid" /work/rootless-docker
+        chown "$uid:$uid" /work/rootless-docker /work/data /work/data/soft-serve /work/data/tor /work/backups
         chmod 700 /work/rootless-docker
+        chmod 777 /work/data /work/data/soft-serve /work/data/tor /work/backups
     ' sh "$dind_uid"
 
 DOCKER_HOST="$OUTER_DOCKER_HOST" docker run -d --privileged \
