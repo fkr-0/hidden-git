@@ -2,7 +2,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ENV_FILE="${HIDDEN_GIT_ENV_FILE:-${ROOT_DIR}/.env}"
+CONFIG_CTL="${ROOT_DIR}/scripts/configctl.py"
+CONFIG_SCHEMA="${ROOT_DIR}/config/schema.json"
+RELEASE_FILE="${ROOT_DIR}/config/release.env"
 OUTPUT_DIR="${1:-${ROOT_DIR}/release-evidence/$(date -u '+%Y%m%dT%H%M%SZ')}"
 VERSION="$(tr -d '[:space:]' < "$ROOT_DIR/VERSION")"
 TARGETS="${EVIDENCE_TARGETS:-soft-serve tor tor-check maintenance}"
@@ -17,31 +19,26 @@ require_cmd() {
     command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
 }
 
-read_env_value() {
-    local key="$1"
-    awk -F= -v wanted="$key" '$1 == wanted {sub(/^[^=]*=/, ""); sub(/[[:space:]]+#.*$/, ""); print; exit}' \
-        "$ENV_FILE"
+release_value() {
+    python3 "$CONFIG_CTL" --schema "$CONFIG_SCHEMA" --release-file "$RELEASE_FILE" \
+        release get "$1"
 }
 
 require_cmd docker
 require_cmd python3
 require_cmd sha256sum
 docker buildx version >/dev/null 2>&1 || die 'Docker Buildx is required'
-[[ -f "$ENV_FILE" ]] || die "environment file not found: $ENV_FILE"
+python3 "$CONFIG_CTL" --schema "$CONFIG_SCHEMA" --release-file "$RELEASE_FILE" \
+    release check >/dev/null || die 'tracked release metadata is invalid'
 
-ALPINE_IMAGE="$(read_env_value ALPINE_IMAGE)"
-GO_IMAGE="$(read_env_value GO_IMAGE)"
-SOFT_SERVE_VERSION="$(read_env_value SOFT_SERVE_VERSION)"
-SOFT_SERVE_WISH_VERSION="$(read_env_value SOFT_SERVE_WISH_VERSION)"
-SOFT_SERVE_GO_GIT_VERSION="$(read_env_value SOFT_SERVE_GO_GIT_VERSION)"
-SOFT_SERVE_GO_JOSE_VERSION="$(read_env_value SOFT_SERVE_GO_JOSE_VERSION)"
-SOFT_SERVE_X_CRYPTO_VERSION="$(read_env_value SOFT_SERVE_X_CRYPTO_VERSION)"
-SOFT_SERVE_X_NET_VERSION="$(read_env_value SOFT_SERVE_X_NET_VERSION)"
-TRIVY_IMAGE="$(read_env_value TRIVY_IMAGE)"
-BUILDKIT_IMAGE="$(read_env_value BUILDKIT_IMAGE)"
+ALPINE_IMAGE="$(release_value ALPINE_IMAGE)"
+GO_IMAGE="$(release_value GO_IMAGE)"
+SOFT_SERVE_VERSION="$(release_value SOFT_SERVE_VERSION)"
+TRIVY_IMAGE="$(release_value TRIVY_IMAGE)"
+BUILDKIT_IMAGE="$(release_value BUILDKIT_IMAGE)"
 for value in "$ALPINE_IMAGE" "$GO_IMAGE" "$TRIVY_IMAGE" "$BUILDKIT_IMAGE"; do
     [[ "$value" =~ @sha256:[0-9a-f]{64}$ ]] \
-        || die "release evidence requires digest-pinned images; run './run.sh sync-pins'"
+        || die "release evidence requires digest-pinned config/release.env values"
 done
 
 mkdir -p "$OUTPUT_DIR/.trivy-cache"
@@ -111,11 +108,6 @@ for target in $TARGETS; do
             dockerfile='Dockerfile.soft-serve'
             build_args+=(--build-arg "GO_IMAGE=$GO_IMAGE")
             build_args+=(--build-arg "SOFT_SERVE_VERSION=$SOFT_SERVE_VERSION")
-            build_args+=(--build-arg "SOFT_SERVE_WISH_VERSION=$SOFT_SERVE_WISH_VERSION")
-            build_args+=(--build-arg "SOFT_SERVE_GO_GIT_VERSION=$SOFT_SERVE_GO_GIT_VERSION")
-            build_args+=(--build-arg "SOFT_SERVE_GO_JOSE_VERSION=$SOFT_SERVE_GO_JOSE_VERSION")
-            build_args+=(--build-arg "SOFT_SERVE_X_CRYPTO_VERSION=$SOFT_SERVE_X_CRYPTO_VERSION")
-            build_args+=(--build-arg "SOFT_SERVE_X_NET_VERSION=$SOFT_SERVE_X_NET_VERSION")
             ;;
         tor) dockerfile='Dockerfile.tor' ;;
         tor-check) dockerfile='Dockerfile.tor-check' ;;

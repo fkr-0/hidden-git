@@ -65,16 +65,23 @@ The preview:
 - maps an old custom `SOFT_SERVE_SSH_PORT` to `LOCAL_SSH_PORT`;
 - removes `ONION_TARGET_PORT`, `SOFT_SERVE_DATA_PATH`, and `CI` when they match
   supported legacy invariants;
-- drops old HTTP/Git/stats internal port settings because those services are no
-  longer host-published in the default profile;
-- updates release-managed pins to the checked-out release;
+- drops release-owned fields because pins now live in tracked
+  `config/release.env`;
+- retires default historical HTTP/Git/stats fields because those services are no
+  longer part of the default profile;
 - fails closed on duplicate keys, unknown keys, conflicting old/new SSH ports,
   mismatched old SSH/Tor targets, or an unsupported custom internal data path.
 
-Warnings about a formerly customized HTTP/Git/stats port mean the old deployment
-used a topology the new secure default intentionally removes. Decide whether to
-accept the reduced surface or maintain a reviewed extension; do not hide the
-warning by inventing a new `.env` knob.
+Any non-default historical HTTP/Git/stats port or HTTP/Git public URL produces
+`BLOCKED_LOSSY`. Preview reports only the affected key names. Ordinary `--apply`
+fails before creating a rollback or writing bytes. If that behavior must survive,
+prepare a reviewed extension first. Otherwise acknowledge only its retirement:
+
+```sh
+./run.sh config migrate --apply --accept-retired-auxiliary-topology
+```
+
+The acknowledgement cannot bypass any other invalid/unsupported migration state.
 
 ## 4. Apply only after reviewing the plan
 
@@ -99,10 +106,10 @@ sha256sum .env
 sha256sum .env
 ```
 
-The second command should say:
+The second command should report `CURRENT` and say:
 
 ```text
-Configuration migration: already canonical
+Configuration migration: CURRENT
 No changes applied; no rollback copy created
 ```
 
@@ -119,6 +126,8 @@ idempotency.
 ```
 
 Verify local SSH on `LOCAL_SSH_PORT` and onion SSH on `ONION_PUBLIC_PORT`.
+If the deployment already has a DB and still carries a bootstrap admin key,
+`doctor` warns; runtime suppression makes it inert, but clear it declaratively.
 
 ## Rollback
 

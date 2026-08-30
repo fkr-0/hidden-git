@@ -1,13 +1,8 @@
-ARG GO_IMAGE=golang:1.26.7-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514
-ARG ALPINE_IMAGE=alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
+ARG GO_IMAGE
+ARG ALPINE_IMAGE
 
 FROM ${GO_IMAGE} AS builder
-ARG SOFT_SERVE_VERSION=v0.12.2
-ARG SOFT_SERVE_WISH_VERSION=v2.0.3
-ARG SOFT_SERVE_GO_GIT_VERSION=v5.19.2
-ARG SOFT_SERVE_GO_JOSE_VERSION=v3.0.5
-ARG SOFT_SERVE_X_CRYPTO_VERSION=v0.54.0
-ARG SOFT_SERVE_X_NET_VERSION=v0.57.0
+ARG SOFT_SERVE_VERSION
 RUN set -eux; \
     export GOMODCACHE=/tmp/gomodcache; \
     mkdir -p /src /out; \
@@ -15,12 +10,6 @@ RUN set -eux; \
     cp -a "${GOMODCACHE}/github.com/charmbracelet/soft-serve@${SOFT_SERVE_VERSION}/." /src/; \
     chmod -R u+w /src; \
     cd /src; \
-    go get \
-      charm.land/wish/v2@${SOFT_SERVE_WISH_VERSION} \
-      github.com/go-git/go-git/v5@${SOFT_SERVE_GO_GIT_VERSION} \
-      github.com/go-jose/go-jose/v3@${SOFT_SERVE_GO_JOSE_VERSION} \
-      golang.org/x/crypto@${SOFT_SERVE_X_CRYPTO_VERSION} \
-      golang.org/x/net@${SOFT_SERVE_X_NET_VERSION}; \
     go mod verify; \
     CGO_ENABLED=0 go build -trimpath \
       -ldflags "-s -w -X main.Version=${SOFT_SERVE_VERSION}" \

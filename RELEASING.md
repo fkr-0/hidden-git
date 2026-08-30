@@ -13,11 +13,14 @@ HiddenGit follows Semantic Versioning 2.0.0.
 `VERSION` is canonical. The following release metadata must agree:
 
 - `VERSION`;
-- `HIDDEN_GIT_VERSION` in `env.example`;
 - the `README.org` release subtitle;
 - the dated release section in `CHANGELOG.md`;
 - the local annotated Git tag `v<VERSION>`;
 - the release documentation assembled from that tag.
+
+Tracked non-secret build/release inputs live in `config/release.env` and are
+validated independently from operator `.env`. The operator file must not carry
+release pins or a second HiddenGit project-version variable.
 
 ## Changelog policy
 
@@ -53,6 +56,7 @@ Update and review:
 VERSION
 env.example
 config/schema.json
+config/release.env
 README.org
 CHANGELOG.md
 ARCHITECTURE.md

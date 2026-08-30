@@ -34,9 +34,10 @@ http:
   tls_cert_path: ""
   public_url: ""
 
-# Keep process statistics available only inside the Soft Serve container.
+# Statistics are disabled entirely in the default HiddenGit profile. Keep the
+# deterministic loopback address only as inert upstream configuration.
 stats:
-  enabled: true
+  enabled: false
   listen_addr: "127.0.0.1:23233"
 
 db:

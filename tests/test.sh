@@ -40,8 +40,9 @@ semver_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[
 grep -Fq '## [Unreleased]' CHANGELOG.md || fail 'CHANGELOG.md has no Unreleased section'
 [[ "$(grep -Fc "## [$version] -" CHANGELOG.md)" == '1' ]] \
     || fail "CHANGELOG.md must contain exactly one dated release section for $version"
-grep -Fxq "HIDDEN_GIT_VERSION=$version" env.example \
-    || fail "env.example version differs from VERSION"
+if grep -Eq '^HIDDEN_GIT_VERSION=' env.example config/release.env; then
+    fail 'VERSION must remain the sole HiddenGit project-version authority'
+fi
 grep -Fxq "#+SUBTITLE: Release $version" README.org \
     || fail "README release subtitle differs from VERSION"
 if [[ "${GITHUB_REF_TYPE:-}" == 'tag' ]]; then
@@ -57,31 +58,34 @@ grep -Fq 'MIT License' LICENSE || fail 'canonical MIT license text is missing'
 grep -Fq 'MIT License' README.org || fail 'README does not reference the license'
 pass 'license metadata'
 
-grep -Eq '^ALPINE_IMAGE=.*@sha256:[0-9a-f]{64}$' env.example \
-    || fail 'ALPINE_IMAGE is not pinned by digest'
-grep -Eq '^GO_IMAGE=.*@sha256:[0-9a-f]{64}$' env.example \
-    || fail 'GO_IMAGE is not pinned by digest'
-grep -Eq '^TRIVY_IMAGE=.*@sha256:[0-9a-f]{64}$' env.example \
-    || fail 'TRIVY_IMAGE is not pinned by digest'
-grep -Eq '^BUILDKIT_IMAGE=.*@sha256:[0-9a-f]{64}$' env.example \
-    || fail 'BUILDKIT_IMAGE is not pinned by digest'
-grep -Eq '^DIND_ROOTLESS_IMAGE=.*@sha256:[0-9a-f]{64}$' env.example \
-    || fail 'DIND_ROOTLESS_IMAGE is not pinned by digest'
-for key in SOFT_SERVE_WISH_VERSION SOFT_SERVE_GO_GIT_VERSION \
-    SOFT_SERVE_GO_JOSE_VERSION SOFT_SERVE_X_CRYPTO_VERSION SOFT_SERVE_X_NET_VERSION; do
-    grep -Eq "^${key}=v[0-9]" env.example \
-        || fail "$key is not explicitly versioned"
+python3 scripts/configctl.py release check >/dev/null
+for key in ALPINE_IMAGE GO_IMAGE TRIVY_IMAGE BUILDKIT_IMAGE DIND_ROOTLESS_IMAGE; do
+    value="$(python3 scripts/configctl.py release get "$key")"
+    [[ "$value" =~ @sha256:[0-9a-f]{64}$ ]] \
+        || fail "$key is not digest-pinned in config/release.env"
 done
-pass 'Soft Serve security override versioning'
-grep -Eq '^ARG ALPINE_IMAGE=.*@sha256:[0-9a-f]{64}$' Dockerfile.tor \
-    || fail 'Tor base image is not pinned by digest'
-grep -Eq '^ARG GO_IMAGE=.*@sha256:[0-9a-f]{64}$' Dockerfile.soft-serve \
-    || fail 'Go builder image is not pinned by digest'
+[[ "$(python3 scripts/configctl.py release get SOFT_SERVE_VERSION)" == 'v0.12.2' ]] \
+    || fail 'Soft Serve release pin changed from reviewed v0.12.2'
+for forbidden_key in SOFT_SERVE_WISH_VERSION SOFT_SERVE_GO_GIT_VERSION \
+    SOFT_SERVE_GO_JOSE_VERSION SOFT_SERVE_X_CRYPTO_VERSION SOFT_SERVE_X_NET_VERSION; do
+    if grep -R -Fq "$forbidden_key" config/schema.json env.example docker-compose.yml \
+        Dockerfile.soft-serve scripts/release-evidence.sh; then
+        fail "$forbidden_key remains in the v2 schema/template/build/evidence surface"
+    fi
+done
+if grep -Eq '^[[:space:]]*go get([[:space:]\\]|$)' Dockerfile.soft-serve; then
+    fail 'Soft Serve Dockerfile still mutates the reviewed upstream dependency graph'
+fi
+grep -Fq 'go mod verify' Dockerfile.soft-serve \
+    || fail 'Soft Serve build no longer verifies the upstream module graph'
 for dockerfile in Dockerfile.soft-serve Dockerfile.tor Dockerfile.tor-check Dockerfile.maintenance; do
+    if grep -Eq '^ARG (ALPINE_IMAGE|GO_IMAGE)=.+sha256:' "$dockerfile"; then
+        fail "$dockerfile duplicates tracked release pins instead of requiring config/release.env build args"
+    fi
     grep -Fq 'apk upgrade --no-cache' "$dockerfile" \
         || fail "$dockerfile does not apply current Alpine security package upgrades"
 done
-pass 'container image digest pinning and base-package security upgrades'
+pass 'tracked release metadata and upstream module graph ownership'
 
 for forbidden in '.env' '.envBackup' 'data/' 'soft-serve-data/' 'tor-data/' 'trunk/'; do
     if git ls-files | grep -Eq "^${forbidden//./\.}"; then
@@ -91,33 +95,44 @@ done
 pass 'tracked-secret hygiene'
 
 grep -Fq 'LOCAL_SSH_PORT:-23231}:23231' docker-compose.yml \
-    || fail 'Compose local SSH publication is not decoupled from the fixed internal port'
+    || fail 'Compose local SSH publication is not decoupled from fixed internal 23231'
 grep -Fq 'HOST_BIND_ADDRESS:-127.0.0.1' docker-compose.yml \
     || fail 'Compose local SSH publication is not loopback-safe by default'
 if grep -Eq 'SOFT_SERVE_(SSH|HTTP|STATS|GIT)_PORT|ONION_TARGET_PORT|SOFT_SERVE_DATA_PATH|[[:space:]]CI:' docker-compose.yml; then
     fail 'Compose still exposes retired internal topology variables'
 fi
-[[ "$(grep -c '^      - .*:' docker-compose.yml)" -ge 1 ]] || fail 'Compose has no port publication'
+grep -Fq 'nc -w 3 127.0.0.1 23231' scripts/soft-serve-healthcheck.sh \
+    || fail 'Soft Serve healthcheck does not target fixed internal SSH 23231'
+grep -Fq "HiddenServicePort \${ONION_PUBLIC_PORT} soft-serve:23231" soft-serve-hidden-service.torrc.template \
+    || fail 'Tor target is not fixed at soft-serve:23231'
+grep -A2 '^stats:' soft-serve.config.yaml.template | grep -Fq 'enabled: false' \
+    || fail 'Soft Serve stats are not disabled'
 grep -Fq 'listen_addr: "127.0.0.1:23233"' soft-serve.config.yaml.template \
-    || fail 'Soft Serve stats are not loopback-only'
+    || fail 'inert Soft Serve stats listen address is not deterministic loopback'
 grep -A2 '^git:' soft-serve.config.yaml.template | grep -Fq 'enabled: false' \
     || fail 'native git daemon is not disabled by default'
 grep -A2 '^http:' soft-serve.config.yaml.template | grep -Fq 'enabled: false' \
     || fail 'HTTP server is not disabled by default'
 grep -A2 '^lfs:' soft-serve.config.yaml.template | grep -Fq 'enabled: false' \
-    || fail 'LFS is not disabled in the SSH-only default profile'
-pass 'minimal fixed internal network topology'
+    || fail 'Git LFS is not disabled in the SSH-only default profile'
+grep -Fq 'ssh_enabled: false' soft-serve.config.yaml.template \
+    || fail 'Git LFS over SSH is not disabled'
+grep -Fq '/run/hidden-git/soft-serve.config.yaml' scripts/soft-serve-entrypoint.sh \
+    || fail 'entrypoint does not select managed runtime config'
+grep -Fq "if [ -e \"\$SOFT_SERVE_DATA_PATH/soft-serve.db\" ]; then" scripts/soft-serve-entrypoint.sh \
+    || fail 'bootstrap suppression does not treat every existing DB path as established state'
+grep -Fq 'unset SOFT_SERVE_INITIAL_ADMIN_KEYS' scripts/soft-serve-entrypoint.sh \
+    || fail 'existing DB does not suppress stale bootstrap admin keys'
+pass 'minimal fixed internal network and bootstrap topology'
 
 for protected in '.env' 'data' 'soft-serve-data' 'tor-data' 'trunk'; do
     grep -Fxq "$protected" .dockerignore \
         || fail ".dockerignore does not protect: $protected"
 done
-pass 'Docker build-context secret hygiene'
-
 grep -Fxq 'backups/' .gitignore || fail 'encrypted backups are not ignored by Git'
 grep -Fxq 'backups' .dockerignore || fail 'encrypted backups enter the Docker build context'
 grep -Fxq 'release-evidence' .dockerignore || fail 'release evidence enters the Docker build context'
-pass 'backup secret hygiene'
+pass 'build-context and backup secret hygiene'
 
 grep -Fq 'timeout --signal=TERM' scripts/tor-check.sh \
     || fail 'containerized SSH attempts lack a hard timeout'
@@ -125,125 +140,327 @@ grep -Fq 'timeout --signal=TERM' run.sh \
     || fail 'host-side SSH attempts lack a hard timeout'
 pass 'bounded SSH attempts'
 
+if grep -Eq 'read_env_value|sync_env_key_from_example|set_env_value' run.sh scripts/operator-ui.sh scripts/release-evidence.sh; then
+    fail 'an independent first-match deployment config parser remains in a consumer path'
+fi
+if grep -Eq 'HIDDEN_GIT_ENV_FILE|ENV_FILE' scripts/release-evidence.sh; then
+    fail 'direct release evidence still reads operator deployment configuration'
+fi
+if grep -Eq 'BACKUP_IDENTITY_FILE' env.example run.sh scripts/operator-ui.sh; then
+    fail 'recovery identity path is still part of current declarative configuration or command fallback paths'
+fi
+fixed_tmp="$(printf '/%s/' tmp)"
+if grep -R -E "mktemp[^[:cntrl:]]*${fixed_tmp}|PYTHONPYCACHEPREFIX=${fixed_tmp}" tests >/dev/null; then
+    fail 'test qualification still contains a fixed bare scratch path under the global temporary directory'
+fi
+pass 'single parser boundary and no fixed test scratch paths'
+
 config_fixture="$(mktemp -d)"
 trap 'rm -rf "$config_fixture"' EXIT
-cp env.example "$config_fixture/current.env"
-chmod 600 "$config_fixture/current.env"
-HIDDEN_GIT_ENV_FILE="$config_fixture/current.env" ./run.sh config check >/dev/null
-first_hash="$(sha256sum "$config_fixture/current.env" | awk '{print $1}')"
-HIDDEN_GIT_ENV_FILE="$config_fixture/current.env" ./run.sh config migrate --apply \
-    | grep -Fq 'No changes applied; no rollback copy created'
-[[ "$first_hash" == "$(sha256sum "$config_fixture/current.env" | awk '{print $1}')" ]] \
-    || fail 'canonical migration changed a current config'
-pass 'current configuration schema and no-op migration'
 
-cat > "$config_fixture/legacy.env" <<'EOF'
-HIDDEN_GIT_VERSION=0.0.3
-ALPINE_IMAGE=alpine:old
-GO_IMAGE=golang:old
-SOFT_SERVE_VERSION=v0.11.6
-SOFT_SERVE_WISH_VERSION=v2.0.1
-SOFT_SERVE_GO_GIT_VERSION=v5.19.0
-SOFT_SERVE_GO_JOSE_VERSION=v3.0.5
-SOFT_SERVE_X_CRYPTO_VERSION=v0.52.0
-SOFT_SERVE_X_NET_VERSION=v0.55.0
-TRIVY_IMAGE=trivy:old
-BUILDKIT_IMAGE=buildkit:old
-DIND_ROOTLESS_IMAGE=dind:old
-SOFT_SERVE_SSH_PORT=40123
+configctl() {
+    local env_file="$1"
+    shift
+    python3 scripts/configctl.py --env "$env_file" --schema config/schema.json \
+        --template env.example --release-file config/release.env "$@"
+}
+
+plan_state() {
+    configctl "$1" migrate --json "${@:2}" \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])'
+}
+
+write_legacy_default() {
+    local path="$1"
+    cat > "$path" <<'EOF'
+HIDDEN_GIT_VERSION=0.0.2
+SOFT_SERVE_SSH_PORT=23231
 SOFT_SERVE_HTTP_PORT=23232
 SOFT_SERVE_STATS_PORT=23233
 SOFT_SERVE_GIT_PORT=9418
-ONION_TARGET_PORT=40123
-ONION_PUBLIC_PORT=8002 # inline-comment regression
+ONION_TARGET_PORT=23231
 SOFT_SERVE_DATA_PATH=/var/lib/soft-serve
-SOFT_SERVE_NAME="Legacy # forge"
-SOFT_SERVE_INITIAL_ADMIN_KEYS="ssh-ed25519 DO-NOT-PRINT operator@example"
 CI=1
-HOST_BIND_ADDRESS=127.0.0.1
-SOFT_SERVE_SSH_PUBLIC_URL=ssh://localhost:40123
 SOFT_SERVE_HTTP_PUBLIC_URL=http://localhost:23232
 SOFT_SERVE_GIT_PUBLIC_URL=git://localhost:9418
+SOFT_SERVE_SSH_PUBLIC_URL=ssh://localhost:23231
+EOF
+    chmod 600 "$path"
+}
+
+# 1. current v2 canonical -> no-op
+cp env.example "$config_fixture/current-v2.env"
+chmod 600 "$config_fixture/current-v2.env"
+[[ "$(plan_state "$config_fixture/current-v2.env")" == CURRENT ]]
+current_hash="$(sha256sum "$config_fixture/current-v2.env" | awk '{print $1}')"
+configctl "$config_fixture/current-v2.env" migrate --apply \
+    | grep -Fq 'No changes applied; no rollback copy created'
+[[ "$current_hash" == "$(sha256sum "$config_fixture/current-v2.env" | awk '{print $1}')" ]] \
+    || fail 'current v2 no-op changed bytes'
+[[ "$(find "$config_fixture" -name 'current-v2.env.pre-config-*' | wc -l)" == 0 ]]
+
+# 2. current v1 -> v2 ownership migration; also proves release overrides are historical-only.
+cat > "$config_fixture/v1.env" <<'EOF'
+HIDDEN_GIT_CONFIG_VERSION=1
+HIDDEN_GIT_VERSION=0.1.3
+ALPINE_IMAGE=alpine:old
+GO_IMAGE=golang:old
+SOFT_SERVE_VERSION=v0.12.2
+SOFT_SERVE_WISH_VERSION=v2.0.3
+SOFT_SERVE_GO_GIT_VERSION=v5.19.2
+SOFT_SERVE_GO_JOSE_VERSION=v3.0.5
+SOFT_SERVE_X_CRYPTO_VERSION=v0.54.0
+SOFT_SERVE_X_NET_VERSION=v0.57.0
+TRIVY_IMAGE=trivy:old
+BUILDKIT_IMAGE=buildkit:old
+DIND_ROOTLESS_IMAGE=dind:old
+SOFT_SERVE_NAME=HiddenGit
+SOFT_SERVE_INITIAL_ADMIN_KEYS=
+ONION_PUBLIC_PORT=8002
+LOCAL_SSH_PORT=40222
+HOST_BIND_ADDRESS=127.0.0.1
+SOFT_SERVE_SSH_PUBLIC_URL=ssh://git.example.invalid:2200
 SOFT_SERVE_SSH_USER=admin
 CHECK_TIMEOUT_SECONDS=180
 BACKUP_RECIPIENT=
-BACKUP_IDENTITY_FILE=/secret/recovery/key
+BACKUP_IDENTITY_FILE=/secret/not-read/recovery.agekey
 EOF
-chmod 600 "$config_fixture/legacy.env"
-preview="$(HIDDEN_GIT_ENV_FILE="$config_fixture/legacy.env" ./run.sh config migrate)"
-grep -Fq 'add LOCAL_SSH_PORT' <<<"$preview"
-if grep -Eq 'DO-NOT-PRINT|/secret/recovery/key' <<<"$preview"; then
-    fail 'config migration preview leaked secret-bearing values'
+chmod 600 "$config_fixture/v1.env"
+[[ "$(plan_state "$config_fixture/v1.env")" == MIGRATABLE ]]
+preview="$(configctl "$config_fixture/v1.env" migrate)"
+if grep -Eq '/secret/not-read|alpine:old' <<<"$preview"; then
+    fail 'v1 migration preview leaked removed values'
 fi
-HIDDEN_GIT_ENV_FILE="$config_fixture/legacy.env" ./run.sh config migrate --apply >/dev/null
-grep -Fxq 'LOCAL_SSH_PORT=40123' "$config_fixture/legacy.env" \
-    || fail 'legacy custom SSH port was not preserved as the local host port'
-if grep -Eq '^(SOFT_SERVE_(SSH|HTTP|STATS|GIT)_PORT|ONION_TARGET_PORT|SOFT_SERVE_DATA_PATH|CI)=' \
-    "$config_fixture/legacy.env"; then
-    fail 'legacy internal topology keys survived canonical migration'
+configctl "$config_fixture/v1.env" migrate --apply >/dev/null
+grep -Fxq 'HIDDEN_GIT_CONFIG_VERSION=2' "$config_fixture/v1.env"
+grep -Fxq 'LOCAL_SSH_PORT=40222' "$config_fixture/v1.env"
+grep -Fxq 'SOFT_SERVE_SSH_PUBLIC_URL=ssh://git.example.invalid:2200' "$config_fixture/v1.env"
+if grep -Eq '^(ALPINE_IMAGE|SOFT_SERVE_WISH_VERSION|BACKUP_IDENTITY_FILE)=' "$config_fixture/v1.env"; then
+    fail 'v1 release/recovery ownership keys survived migration'
 fi
-[[ "$(stat -c '%a' "$config_fixture/legacy.env")" == '600' ]]
-legacy_hash="$(sha256sum "$config_fixture/legacy.env" | awk '{print $1}')"
-backup_count="$(find "$config_fixture" -maxdepth 1 -name 'legacy.env.pre-config-*' | wc -l)"
-HIDDEN_GIT_ENV_FILE="$config_fixture/legacy.env" ./run.sh config migrate --apply \
-    | grep -Fq 'No changes applied; no rollback copy created'
-[[ "$legacy_hash" == "$(sha256sum "$config_fixture/legacy.env" | awk '{print $1}')" ]]
-[[ "$backup_count" == "$(find "$config_fixture" -maxdepth 1 -name 'legacy.env.pre-config-*' | wc -l)" ]]
-pass 'legacy configuration convergence and second-apply idempotency'
 
+# 3. pre-v0.0.2 default
+write_legacy_default "$config_fixture/pre-v002.env"
+sed -i '/^HIDDEN_GIT_VERSION=/d' "$config_fixture/pre-v002.env"
+[[ "$(plan_state "$config_fixture/pre-v002.env")" == MIGRATABLE ]]
+configctl "$config_fixture/pre-v002.env" migrate --apply >/dev/null
+configctl "$config_fixture/pre-v002.env" check >/dev/null
+
+# 4. v0.0.2 default
+write_legacy_default "$config_fixture/v002.env"
+[[ "$(plan_state "$config_fixture/v002.env")" == MIGRATABLE ]]
+configctl "$config_fixture/v002.env" migrate --apply >/dev/null
+configctl "$config_fixture/v002.env" check >/dev/null
+
+# 5. v0.0.3 custom SSH + matching Tor target
+write_legacy_default "$config_fixture/v003-custom.env"
+sed -i -e 's/^HIDDEN_GIT_VERSION=.*/HIDDEN_GIT_VERSION=0.0.3/' \
+    -e 's/^SOFT_SERVE_SSH_PORT=.*/SOFT_SERVE_SSH_PORT=40123/' \
+    -e 's/^ONION_TARGET_PORT=.*/ONION_TARGET_PORT=40123/' \
+    "$config_fixture/v003-custom.env"
+configctl "$config_fixture/v003-custom.env" migrate --apply >/dev/null
+grep -Fxq 'LOCAL_SSH_PORT=40123' "$config_fixture/v003-custom.env" \
+    || fail 'custom legacy SSH did not become host-only LOCAL_SSH_PORT'
+
+# 6. mismatched old SSH/Tor target -> fail closed
+write_legacy_default "$config_fixture/mismatch.env"
+sed -i -e 's/^SOFT_SERVE_SSH_PORT=.*/SOFT_SERVE_SSH_PORT=40123/' \
+    -e 's/^ONION_TARGET_PORT=.*/ONION_TARGET_PORT=40124/' "$config_fixture/mismatch.env"
+if configctl "$config_fixture/mismatch.env" migrate >/dev/null 2>&1; then
+    fail 'mismatched legacy SSH/Tor target migrated'
+fi
+
+# 7. old+new SSH alias conflict -> fail closed, even if values happen to match.
+write_legacy_default "$config_fixture/alias-conflict.env"
+printf 'LOCAL_SSH_PORT=23231\n' >> "$config_fixture/alias-conflict.env"
+if configctl "$config_fixture/alias-conflict.env" migrate >/dev/null 2>&1; then
+    fail 'old+new SSH aliases were accepted together'
+fi
+
+assert_lossy() {
+    local key="$1"
+    local replacement="$2"
+    local file="$config_fixture/lossy-${key}.env"
+    write_legacy_default "$file"
+    python3 - "$file" "$key" "$replacement" <<'PY'
+from pathlib import Path
+import sys
+path=Path(sys.argv[1]); key=sys.argv[2]; value=sys.argv[3]
+lines=path.read_text().splitlines()
+for i,line in enumerate(lines):
+    if line.startswith(key+'='):
+        lines[i]=key+'='+value
+        break
+else:
+    lines.append(key+'='+value)
+path.write_text('\n'.join(lines)+'\n')
+PY
+    chmod 600 "$file"
+    [[ "$(plan_state "$file")" == BLOCKED_LOSSY ]] \
+        || fail "$key custom legacy topology was not BLOCKED_LOSSY"
+    local before_hash before_count preview_output
+    before_hash="$(sha256sum "$file" | awk '{print $1}')"
+    before_count="$(find "$config_fixture" -maxdepth 1 -name "$(basename "$file").pre-config-*" | wc -l)"
+    if configctl "$file" migrate --apply >/dev/null 2>&1; then
+        fail "$key lossy migration applied without acknowledgement"
+    fi
+    [[ "$before_hash" == "$(sha256sum "$file" | awk '{print $1}')" ]] \
+        || fail "$key blocked lossy migration wrote bytes"
+    [[ "$before_count" == "$(find "$config_fixture" -maxdepth 1 -name "$(basename "$file").pre-config-*" | wc -l)" ]] \
+        || fail "$key blocked lossy migration created rollback state"
+    preview_output="$(configctl "$file" migrate)"
+    grep -Fq "$key" <<<"$preview_output" || fail "$key absent from lossy preview"
+    if grep -Fq "$replacement" <<<"$preview_output"; then
+        fail "$key lossy preview exposed the retired value"
+    fi
+    [[ "$(plan_state "$file" --accept-retired-auxiliary-topology)" == MIGRATABLE_ACK ]]
+    configctl "$file" migrate --apply --accept-retired-auxiliary-topology >/dev/null
+    configctl "$file" check >/dev/null
+    if grep -Eq "^${key}=" "$file"; then
+        fail "$key survived acknowledged retirement"
+    fi
+}
+
+# 8-12. custom retired auxiliary topology -> BLOCKED_LOSSY
+assert_lossy SOFT_SERVE_HTTP_PORT 30232
+assert_lossy SOFT_SERVE_STATS_PORT 30233
+assert_lossy SOFT_SERVE_GIT_PORT 19418
+assert_lossy SOFT_SERVE_HTTP_PUBLIC_URL https://legacy.example.invalid:30232
+assert_lossy SOFT_SERVE_GIT_PUBLIC_URL git://legacy.example.invalid:19418
+
+# 13. duplicate current key -> fail before mutation
 cp env.example "$config_fixture/duplicate.env"
 printf 'LOCAL_SSH_PORT=49999\n' >> "$config_fixture/duplicate.env"
 chmod 600 "$config_fixture/duplicate.env"
-if HIDDEN_GIT_ENV_FILE="$config_fixture/duplicate.env" ./run.sh config check >/dev/null 2>&1; then
-    fail 'duplicate config key was accepted'
+duplicate_hash="$(sha256sum "$config_fixture/duplicate.env" | awk '{print $1}')"
+if configctl "$config_fixture/duplicate.env" migrate --apply >/dev/null 2>&1; then
+    fail 'duplicate current key was accepted'
 fi
+[[ "$duplicate_hash" == "$(sha256sum "$config_fixture/duplicate.env" | awk '{print $1}')" ]]
+[[ "$(find "$config_fixture" -name 'duplicate.env.pre-config-*' | wc -l)" == 0 ]]
+
+# 14. unknown/typo current key -> fail before mutation
 cp env.example "$config_fixture/unknown.env"
 printf 'LOCAL_SSH_P0RT=49999\n' >> "$config_fixture/unknown.env"
 chmod 600 "$config_fixture/unknown.env"
-if HIDDEN_GIT_ENV_FILE="$config_fixture/unknown.env" ./run.sh config check >/dev/null 2>&1; then
-    fail 'unknown config key was accepted'
+unknown_hash="$(sha256sum "$config_fixture/unknown.env" | awk '{print $1}')"
+if configctl "$config_fixture/unknown.env" migrate --apply >/dev/null 2>&1; then
+    fail 'unknown current key was accepted'
 fi
-sed -e 's/^LOCAL_SSH_PORT=.*/SOFT_SERVE_SSH_PORT=40123/' \
-    -e '/^ONION_PUBLIC_PORT=/a ONION_TARGET_PORT=40124' \
-    env.example > "$config_fixture/conflict.env"
-chmod 600 "$config_fixture/conflict.env"
-if HIDDEN_GIT_ENV_FILE="$config_fixture/conflict.env" ./run.sh config migrate >/dev/null 2>&1; then
-    fail 'mismatched legacy SSH/Tor target was migrated instead of failing closed'
-fi
-pass 'duplicate, unknown, and ambiguous legacy config rejection'
+[[ "$unknown_hash" == "$(sha256sum "$config_fixture/unknown.env" | awk '{print $1}')" ]]
+[[ "$(find "$config_fixture" -name 'unknown.env.pre-config-*' | wc -l)" == 0 ]]
 
-sync_env="$config_fixture/sync.env"
-cp env.example "$sync_env"
-sed -i \
-    -e 's#^ALPINE_IMAGE=.*#ALPINE_IMAGE=alpine:3.23#' \
-    -e 's#^GO_IMAGE=.*#GO_IMAGE=golang:1.26.7-bookworm#' \
-    -e '/^TRIVY_IMAGE=/d' \
-    -e '/^BUILDKIT_IMAGE=/d' \
-    -e 's/^LOCAL_SSH_PORT=.*/LOCAL_SSH_PORT=40123/' \
-    "$sync_env"
-chmod 644 "$sync_env"
-HIDDEN_GIT_ENV_FILE="$sync_env" ./run.sh sync-pins >/dev/null
-grep -Fxq 'LOCAL_SSH_PORT=40123' "$sync_env" \
-    || fail 'sync-pins changed a deployment-specific local SSH port'
-grep -Eq '^ALPINE_IMAGE=.*@sha256:[0-9a-f]{64}$' "$sync_env" \
-    || fail 'sync-pins did not restore the Alpine digest'
-grep -Eq '^TRIVY_IMAGE=.*@sha256:[0-9a-f]{64}$' "$sync_env" \
-    || fail 'sync-pins did not add the scanner digest'
-grep -Eq '^BUILDKIT_IMAGE=.*@sha256:[0-9a-f]{64}$' "$sync_env" \
-    || fail 'sync-pins did not add the BuildKit digest'
-[[ "$(stat -c '%a' "$sync_env")" == '600' ]] \
-    || fail 'sync-pins did not restrict the environment file mode'
-sync_backup="$(find "$config_fixture" -maxdepth 1 -name 'sync.env.pre-sync-*' -print -quit)"
-[[ -n "$sync_backup" && "$(stat -c '%a' "$sync_backup")" == '600' ]] \
-    || fail 'sync-pins did not create a private rollback copy'
-pass 'safe release pin synchronization'
+# Operator .env cannot override tracked release metadata.
+cp env.example "$config_fixture/release-override.env"
+printf 'ALPINE_IMAGE=alpine:latest\n' >> "$config_fixture/release-override.env"
+chmod 600 "$config_fixture/release-override.env"
+if configctl "$config_fixture/release-override.env" check >/dev/null 2>&1; then
+    fail 'operator config was allowed to override tracked release metadata'
+fi
+
+# 15. inline comments and quoted values parse safely, then canonicalize.
+write_legacy_default "$config_fixture/quoted.env"
+printf 'SOFT_SERVE_NAME="Legacy # forge"\nONION_PUBLIC_PORT=8002 # inline\n' >> "$config_fixture/quoted.env"
+configctl "$config_fixture/quoted.env" migrate --apply >/dev/null
+grep -Fxq 'SOFT_SERVE_NAME="Legacy # forge"' "$config_fixture/quoted.env"
+grep -Fxq 'ONION_PUBLIC_PORT=8002' "$config_fixture/quoted.env"
+
+# 16. custom LOCAL_SSH_PORT + unrelated explicit public SSH URL stay independent.
+cat > "$config_fixture/independent-url.env" <<'EOF'
+HIDDEN_GIT_CONFIG_VERSION=1
+SOFT_SERVE_NAME=HiddenGit
+SOFT_SERVE_INITIAL_ADMIN_KEYS=
+ONION_PUBLIC_PORT=8002
+LOCAL_SSH_PORT=40123
+HOST_BIND_ADDRESS=127.0.0.1
+SOFT_SERVE_SSH_PUBLIC_URL=ssh://metadata.example.invalid:2200
+SOFT_SERVE_SSH_USER=admin
+CHECK_TIMEOUT_SECONDS=180
+BACKUP_RECIPIENT=
+EOF
+chmod 600 "$config_fixture/independent-url.env"
+configctl "$config_fixture/independent-url.env" migrate --apply >/dev/null
+grep -Fxq 'LOCAL_SSH_PORT=40123' "$config_fixture/independent-url.env"
+grep -Fxq 'SOFT_SERVE_SSH_PUBLIC_URL=ssh://metadata.example.invalid:2200' "$config_fixture/independent-url.env"
+
+# 17. first apply + identical second apply: exact bytes, one rollback only.
+cat > "$config_fixture/twice.env" <<'EOF'
+HIDDEN_GIT_CONFIG_VERSION=1
+SOFT_SERVE_NAME=HiddenGit
+SOFT_SERVE_INITIAL_ADMIN_KEYS=
+ONION_PUBLIC_PORT=8122
+LOCAL_SSH_PORT=40222
+HOST_BIND_ADDRESS=127.0.0.1
+SOFT_SERVE_SSH_PUBLIC_URL=
+SOFT_SERVE_SSH_USER=admin
+CHECK_TIMEOUT_SECONDS=180
+BACKUP_RECIPIENT=
+EOF
+chmod 600 "$config_fixture/twice.env"
+configctl "$config_fixture/twice.env" migrate --apply >/dev/null
+first_apply_hash="$(sha256sum "$config_fixture/twice.env" | awk '{print $1}')"
+first_backup_count="$(find "$config_fixture" -name 'twice.env.pre-config-*' | wc -l)"
+[[ "$first_backup_count" == 1 ]] || fail 'first migration did not create exactly one rollback copy'
+configctl "$config_fixture/twice.env" migrate --apply \
+    | grep -Fq 'No changes applied; no rollback copy created'
+[[ "$first_apply_hash" == "$(sha256sum "$config_fixture/twice.env" | awk '{print $1}')" ]] \
+    || fail 'second migration apply changed canonical bytes'
+[[ "$first_backup_count" == "$(find "$config_fixture" -name 'twice.env.pre-config-*' | wc -l)" ]] \
+    || fail 'second migration apply created another rollback copy'
+
+# 18. sentinel DB/repository/Tor files outside the config file remain byte-identical.
+sentinel="$config_fixture/sentinel-runtime"
+mkdir -p "$sentinel/data/soft-serve/repos/example.git" "$sentinel/data/tor/hidden_service"
+printf 'db sentinel\n' > "$sentinel/data/soft-serve/soft-serve.db"
+printf 'repo sentinel\n' > "$sentinel/data/soft-serve/repos/example.git/HEAD"
+printf 'tor sentinel\n' > "$sentinel/data/tor/hidden_service/hs_ed25519_secret_key"
+sentinel_before="$(find "$sentinel" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')"
+cat > "$config_fixture/sentinel-migrate.env" <<'EOF'
+HIDDEN_GIT_CONFIG_VERSION=1
+SOFT_SERVE_NAME=HiddenGit
+SOFT_SERVE_INITIAL_ADMIN_KEYS=
+ONION_PUBLIC_PORT=8002
+LOCAL_SSH_PORT=23231
+HOST_BIND_ADDRESS=127.0.0.1
+SOFT_SERVE_SSH_PUBLIC_URL=
+SOFT_SERVE_SSH_USER=admin
+CHECK_TIMEOUT_SECONDS=180
+BACKUP_RECIPIENT=
+EOF
+chmod 600 "$config_fixture/sentinel-migrate.env"
+configctl "$config_fixture/sentinel-migrate.env" migrate --apply >/dev/null
+sentinel_after="$(find "$sentinel" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')"
+[[ "$sentinel_before" == "$sentinel_after" ]] \
+    || fail 'configuration migration changed sentinel runtime-state bytes'
+pass '18 representative schema-v2 migration fixtures'
+
+# Release metadata itself gets duplicate/unknown rejection through the same parser.
+cp config/release.env "$config_fixture/release-duplicate.env"
+printf 'ALPINE_IMAGE=alpine:duplicate\n' >> "$config_fixture/release-duplicate.env"
+if python3 scripts/configctl.py --release-file "$config_fixture/release-duplicate.env" release check >/dev/null 2>&1; then
+    fail 'duplicate tracked release key was accepted'
+fi
+cp config/release.env "$config_fixture/release-unknown.env"
+printf 'ALP1NE_IMAGE=typo\n' >> "$config_fixture/release-unknown.env"
+if python3 scripts/configctl.py --release-file "$config_fixture/release-unknown.env" release check >/dev/null 2>&1; then
+    fail 'unknown tracked release key was accepted'
+fi
+pass 'tracked release metadata parser rejection'
+
+# sync-pins is compatibility-only and must never mutate operator configuration.
+cp env.example "$config_fixture/sync.env"
+chmod 600 "$config_fixture/sync.env"
+sync_hash="$(sha256sum "$config_fixture/sync.env" | awk '{print $1}')"
+HIDDEN_GIT_ENV_FILE="$config_fixture/sync.env" ./run.sh sync-pins >/dev/null
+[[ "$sync_hash" == "$(sha256sum "$config_fixture/sync.env" | awk '{print $1}')" ]] \
+    || fail 'sync-pins mutated the v2 operator config'
+[[ "$(find "$config_fixture" -name 'sync.env.pre-*' | wc -l)" == 0 ]] \
+    || fail 'sync-pins created an obsolete rollback copy'
+pass 'non-mutating sync-pins compatibility behavior'
 
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-    docker compose --env-file env.example \
-        -f docker-compose.yml \
-        -f docker-compose.tor-check.override.yml \
-        config >/dev/null
-    pass 'Docker Compose configuration'
+    HIDDEN_GIT_ENV_FILE="$config_fixture/current-v2.env" ./run.sh config >/dev/null
+    pass 'Docker Compose configuration through validated tracked release metadata'
 else
     printf 'SKIP: Docker Compose is not available\n'
 fi
@@ -257,7 +474,7 @@ help_output="$(./run.sh help)"
 grep -Fq 'HG-001' <<<"$issues_output"
 grep -Fq 'doctor --strict' <<<"$help_output"
 grep -Fq 'sync-pins' <<<"$help_output"
-grep -Fq 'config migrate' <<<"$help_output"
+grep -Fq 'accept-retired-auxiliary-topology' <<<"$help_output"
 grep -Fq 'migrate-users' <<<"$help_output"
 grep -Fq 'legacy-state' <<<"$help_output"
 grep -Fq 'evidence' <<<"$help_output"
@@ -288,9 +505,11 @@ rm -rf "$legacy_fixture"
 trap - EXIT
 pass 'secret-safe legacy state comparison'
 
-PYTHONPYCACHEPREFIX=/tmp/hidden-git-pycache python3 -m py_compile \
-    scripts/extract-oci-provenance.py scripts/vulnerability-policy.py
-pass 'release evidence Python syntax'
+pycache_dir="$(mktemp -d)"
+PYTHONPYCACHEPREFIX="$pycache_dir" python3 -m py_compile \
+    scripts/configctl.py scripts/extract-oci-provenance.py scripts/vulnerability-policy.py
+rm -rf "$pycache_dir"
+pass 'release/config Python syntax'
 
 if grep -RhoE 'uses:[[:space:]]+[^[:space:]]+@(v[0-9]+|main|master|latest)' \
     .github/workflows | grep -q .; then
@@ -312,4 +531,3 @@ grep -Fq 'rootless-docker' .github/workflows/ci.yml \
 pass 'repository automation manifests'
 
 printf 'All static release checks passed.\n'
-

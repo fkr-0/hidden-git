@@ -22,7 +22,7 @@ A later forensic pass also demonstrated a parser split-brain: `run.sh`'s first-m
 
 ### Current resolution
 
-Configuration schema v1 deliberately changes the abstraction:
+Configuration schema v2 finalizes the abstraction and ownership split:
 
 ```text
 operator intent                         implementation policy
@@ -34,11 +34,11 @@ ONION_PUBLIC_PORT ── Tor ─────┘
 SOFT_SERVE_NAME                         data path /var/lib/soft-serve
 HOST_BIND_ADDRESS                       HTTP disabled
 optional SSH public URL                 git:// disabled
-bootstrap public key                    stats 127.0.0.1:23233
+bootstrap public key                    stats disabled
 recovery values                         LFS + SSH LFS disabled
 ```
 
-`config/schema.json` is the machine-readable classification. `scripts/configctl.py` parses data without `source`/`eval`, rejects duplicate and unknown keys, and owns deterministic legacy normalization.
+`config/schema.json` is the machine-readable classification. `scripts/configctl.py` parses both operator config and tracked `config/release.env` without `source`/`eval`, rejects duplicate and unknown keys, and owns deterministic legacy normalization. Release pins are no longer operator `.env` values.
 
 ### Migration semantics
 
@@ -53,19 +53,11 @@ recovery values                         LFS + SSH LFS disabled
 
 A second identical apply must write nothing and create no backup. This is tested.
 
-Legacy custom SSH ports are interpreted as host-facing intent and migrate to `LOCAL_SSH_PORT`. Custom auxiliary listener ports are retired with a warning because HTTP/native Git are no longer part of the secure default. Unsupported changes to internal persistence path or conflicting SSH/Tor targets fail closed.
+Legacy custom SSH ports are interpreted as host-facing intent and migrate to `LOCAL_SSH_PORT`. Default historical auxiliary topology retires automatically. A non-default HTTP/Git/stats port or public URL is `BLOCKED_LOSSY`: ordinary apply writes nothing and creates no backup; only `--accept-retired-auxiliary-topology` acknowledges that specific retirement. Unsupported persistence changes, duplicate/unknown input, old/new SSH conflicts, mismatched SSH/Tor targets, and future schema versions still fail closed.
 
 ## Soft Serve update discipline
 
-The hardening work moves from upstream Soft Serve v0.11.6 to v0.12.2 because v0.12.0-v0.12.2 contain application-level security fixes not replaced by the old dependency overrides. The explicit override defaults were aligned to the v0.12.2 selected module graph at review time:
-
-- `charm.land/wish/v2 v2.0.3`
-- `github.com/go-git/go-git/v5 v5.19.2`
-- `github.com/go-jose/go-jose/v3 v3.0.5`
-- `golang.org/x/crypto v0.54.0`
-- `golang.org/x/net v0.57.0`
-
-Future updates must re-audit the selected upstream module graph; this list is not a permanent recommendation.
+The hardening work stays on upstream Soft Serve v0.12.2. The five historical downstream Go override settings exactly matched the selected v0.12.2 graph, so schema v2 removes them and the Dockerfile builds that reviewed upstream `go.mod`/`go.sum` graph directly with `go mod verify`. A future override is an exception requiring a separately reviewed reason, advisory/removal condition, and machine comparison; no exception machinery is carried while no override exists.
 
 ## Default service profile
 
@@ -77,7 +69,14 @@ HiddenGit is SSH-over-Tor, not a generic multi-protocol Soft Serve appliance.
 - HTTP is disabled.
 - native `git://` is disabled.
 - LFS and SSH LFS are disabled.
-- stats stays enabled on `127.0.0.1:23233` only.
+- stats is disabled and opens no `23233` socket, even inside the Soft Serve container.
+
+Soft Serve v0.12.2 still treats configured `initial_admin_keys` as server-admin
+authority after DB creation. HiddenGit therefore unsets
+`SOFT_SERVE_INITIAL_ADMIN_KEYS` in the process environment before exec whenever
+`soft-serve.db` already exists. The E2E test persists a non-admin user, places
+that user's key into the stale bootstrap field, recreates Soft Serve, and proves
+global `settings`/`user` operations remain unauthorized.
 
 An extension that widens this profile must carry explicit threat-model, migration, documentation, positive socket tests, and negative reachability tests.
 

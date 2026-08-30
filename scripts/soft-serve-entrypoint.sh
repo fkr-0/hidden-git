@@ -32,7 +32,13 @@ fi
 umask 077
 mkdir -p "$SOFT_SERVE_DATA_PATH/ssh" /run/hidden-git
 
-if [ ! -s "$SOFT_SERVE_DATA_PATH/soft-serve.db" ] && [ -z "${SOFT_SERVE_INITIAL_ADMIN_KEYS:-}" ]; then
+if [ -e "$SOFT_SERVE_DATA_PATH/soft-serve.db" ]; then
+    # Soft Serve v0.12.2 still consults initial_admin_keys when authorizing
+    # server-admin commands. Once a DB exists, bootstrap keys must therefore be
+    # absent from the Soft Serve process environment rather than merely called
+    # "bootstrap-only" in documentation.
+    unset SOFT_SERVE_INITIAL_ADMIN_KEYS
+elif [ -z "${SOFT_SERVE_INITIAL_ADMIN_KEYS:-}" ]; then
     fail "SOFT_SERVE_INITIAL_ADMIN_KEYS must contain at least one SSH public key on first boot"
 fi
 

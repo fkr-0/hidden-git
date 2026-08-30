@@ -46,13 +46,15 @@ Git smart protocol with public-key authentication. The default profile disables:
 - Git LFS;
 - SSH LFS.
 
-Stats stays enabled only on container loopback. Fewer reachable protocols reduce
+Stats is disabled entirely; the template's loopback stats address is inert.
+Fewer reachable protocols reduce
 the set of parsers/auth paths that need exposure and independent security review.
 
 ## Upstream security cadence
 
-HiddenGit tracks a pinned Soft Serve release and explicit dependency graph. A
-dependency override is not considered a substitute for application-level fixes.
+HiddenGit tracks a pinned Soft Serve release and immutable image set in
+`config/release.env`. It builds the reviewed upstream Soft Serve module graph
+directly; a dependency override is not considered a substitute for application-level fixes.
 The release process therefore checks current upstream security releases and
 regenerates strict vulnerability evidence before tagging.
 

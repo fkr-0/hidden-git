@@ -7,7 +7,9 @@ COMPOSE_TOR_CHECK_OVERRIDE="${ROOT_DIR}/docker-compose.tor-check.override.yml"
 ENV_FILE="${HIDDEN_GIT_ENV_FILE:-${ROOT_DIR}/.env}"
 VERSION_FILE="${ROOT_DIR}/VERSION"
 CONFIG_SCHEMA="${ROOT_DIR}/config/schema.json"
+RELEASE_FILE="${ROOT_DIR}/config/release.env"
 CONFIG_CTL="${ROOT_DIR}/scripts/configctl.py"
+RELEASE_KEYS=(ALPINE_IMAGE GO_IMAGE SOFT_SERVE_VERSION TRIVY_IMAGE BUILDKIT_IMAGE DIND_ROOTLESS_IMAGE)
 COMPOSE=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
 COMPOSE_CHECK=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" -f "${COMPOSE_TOR_CHECK_OVERRIDE}")
 COMPOSE_MAINTENANCE=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" --profile maintenance)
@@ -37,30 +39,14 @@ maintenance_output_gid() {
 }
 
 build_maintenance_image() {
-    "${COMPOSE_MAINTENANCE[@]}" build maintenance >/dev/null
-    local image
-    image="$(docker image ls \
-        --filter label=com.docker.compose.project=hidden-git \
-        --filter label=com.docker.compose.service=maintenance \
-        -q | head -n1)"
+    require_release_runtime
+    local image alpine_image
+    alpine_image="$(release_value ALPINE_IMAGE)"
+    image="$(docker build -q \
+        --build-arg "ALPINE_IMAGE=${alpine_image}" \
+        -f "$ROOT_DIR/Dockerfile.maintenance" "$ROOT_DIR")"
     [[ -n "$image" ]] || fail 'maintenance image was not produced'
     printf '%s\n' "$image"
-}
-
-set_env_value() {
-    local key="$1"
-    local value="$2"
-    local tmp
-    tmp="$(mktemp)"
-    awk -v wanted="$key" -v replacement="$value" '
-        BEGIN { found = 0 }
-        $0 ~ "^" wanted "=" { print wanted "=" replacement; found = 1; next }
-        { print }
-        END { if (!found) print wanted "=" replacement }
-    ' "$ENV_FILE" > "$tmp"
-    cat "$tmp" > "$ENV_FILE"
-    rm -f "$tmp"
-    chmod 600 "$ENV_FILE"
 }
 
 cmd_migrate_users() {
@@ -99,43 +85,16 @@ ensure_runtime_ownership() {
     cmd_migrate_users
 }
 
-sync_env_key_from_example() {
-    local key="$1"
-    local value tmp
-    value="$(awk -F= -v wanted="$key" '$1 == wanted {sub(/^[^=]*=/, ""); print; exit}' \
-        "$ROOT_DIR/env.example")"
-    [[ -n "$value" ]] || fail "env.example has no value for $key"
-    tmp="$(mktemp)"
-    awk -v wanted="$key" -v replacement="$value" '
-        BEGIN { found = 0 }
-        $0 ~ "^" wanted "=" { print wanted "=" replacement; found = 1; next }
-        { print }
-        END { if (!found) print wanted "=" replacement }
-    ' "$ENV_FILE" > "$tmp"
-    cat "$tmp" > "$ENV_FILE"
-    rm -f "$tmp"
-}
-
 cmd_sync_pins() {
-    [[ -f "$ENV_FILE" ]] || fail "environment file not found at $ENV_FILE"
-    local backup key
-    backup="${ENV_FILE}.pre-sync-$(date -u '+%Y%m%dT%H%M%SZ')"
-    cp -p "$ENV_FILE" "$backup"
-    for key in HIDDEN_GIT_VERSION ALPINE_IMAGE GO_IMAGE SOFT_SERVE_VERSION \
-        SOFT_SERVE_WISH_VERSION SOFT_SERVE_GO_GIT_VERSION \
-        SOFT_SERVE_GO_JOSE_VERSION SOFT_SERVE_X_CRYPTO_VERSION \
-        SOFT_SERVE_X_NET_VERSION TRIVY_IMAGE BUILDKIT_IMAGE DIND_ROOTLESS_IMAGE; do
-        sync_env_key_from_example "$key"
-    done
-    sed -i '/^DEBIAN_IMAGE=/d' "$ENV_FILE"
-    chmod 600 "$ENV_FILE" "$backup"
-    log "Updated reviewed release references in $ENV_FILE"
-    log "Previous environment saved at $backup"
+    require_env_file
+    require_cmd python3
+    validate_environment
+    log "Release pins are tracked in $RELEASE_FILE and already validated"
+    log "sync-pins is compatibility-only in config v2; no .env bytes were changed"
 }
 
 cmd_evidence() {
-    require_runtime
-    validate_environment
+    require_release_runtime
     "$ROOT_DIR/scripts/release-evidence.sh" "${1:-}"
 }
 
@@ -166,40 +125,55 @@ require_env_file() {
     [[ -f "${ENV_FILE}" ]] || fail "environment file not found at ${ENV_FILE}; run './run.sh init' first"
 }
 
-require_runtime() {
-    require_env_file
+configctl_base() {
+    python3 "$CONFIG_CTL" --env "$ENV_FILE" --schema "$CONFIG_SCHEMA" \
+        --template "$ROOT_DIR/env.example" --release-file "$RELEASE_FILE" "$@"
+}
+
+config_value() {
+    configctl_base get "$1"
+}
+
+release_value() {
+    python3 "$CONFIG_CTL" --schema "$CONFIG_SCHEMA" --release-file "$RELEASE_FILE" \
+        release get "$1"
+}
+
+validate_release_metadata() {
+    python3 "$CONFIG_CTL" --schema "$CONFIG_SCHEMA" --release-file "$RELEASE_FILE" \
+        release check >/dev/null
+}
+
+load_release_environment() {
+    local key value
+    for key in "${RELEASE_KEYS[@]}"; do
+        value="$(release_value "$key")" || fail "tracked release metadata is invalid"
+        export "$key=$value"
+    done
+}
+
+require_docker() {
     require_cmd docker
     docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required"
 }
 
-has_oniux() {
-    command -v oniux >/dev/null 2>&1
+require_release_runtime() {
+    require_cmd python3
+    validate_release_metadata || fail "tracked release metadata is invalid"
+    load_release_environment
+    require_docker
 }
 
-read_env_value() {
-    local key="$1"
-    awk -v wanted="$key" '
-        {
-            line = $0
-            sub(/\r$/, "", line)
-            sub(/^[[:space:]]*/, "", line)
-            if (line ~ "^" wanted "[[:space:]]*=") {
-                sub(/^[^=]*=[[:space:]]*/, "", line)
-                if (line ~ /^"/) {
-                    sub(/^"/, "", line)
-                    sub(/"[[:space:]]*(#.*)?$/, "", line)
-                } else if (line ~ /^\047/) {
-                    sub(/^\047/, "", line)
-                    sub(/\047[[:space:]]*(#.*)?$/, "", line)
-                } else {
-                    sub(/[[:space:]]+#.*$/, "", line)
-                    sub(/[[:space:]]*$/, "", line)
-                }
-                print line
-                exit
-            }
-        }
-    ' "${ENV_FILE}"
+require_runtime() {
+    require_env_file
+    require_cmd python3
+    validate_environment
+    load_release_environment
+    require_docker
+}
+
+has_oniux() {
+    command -v oniux >/dev/null 2>&1
 }
 
 validate_port() {
@@ -211,15 +185,14 @@ validate_port() {
 
 validate_environment() {
     require_cmd python3
-    if ! python3 "$CONFIG_CTL" --env "$ENV_FILE" --schema "$CONFIG_SCHEMA" \
-        --template "$ROOT_DIR/env.example" check; then
+    if ! configctl_base check; then
         fail "configuration is not canonical; run './run.sh config migrate' for a secret-safe preview"
     fi
 }
 
 validate_first_boot_admin() {
     local admin_keys
-    admin_keys="$(read_env_value SOFT_SERVE_INITIAL_ADMIN_KEYS)"
+    admin_keys="$(config_value SOFT_SERVE_INITIAL_ADMIN_KEYS)"
     if ! runtime_contains_state && [[ -z "$admin_keys" ]]; then
         fail "SOFT_SERVE_INITIAL_ADMIN_KEYS is required before first boot"
     fi
@@ -271,8 +244,8 @@ run_tor_ssh_check_task() {
 is_onion_ssh_connectable() {
     local host="$1"
     local onion_port ssh_user known_hosts output rc
-    onion_port="$(read_env_value ONION_PUBLIC_PORT)"
-    ssh_user="$(read_env_value SOFT_SERVE_SSH_USER)"
+    onion_port="$(config_value ONION_PUBLIC_PORT)"
+    ssh_user="$(config_value SOFT_SERVE_SSH_USER)"
     [[ -n "$ssh_user" ]] || ssh_user="admin"
     validate_port ONION_PUBLIC_PORT "$onion_port"
 
@@ -320,7 +293,7 @@ wait_for_onion_ssh() {
 verify_onion_ssh_connectivity() {
     local host="$1"
     local timeout_s
-    timeout_s="$(read_env_value CHECK_TIMEOUT_SECONDS)"
+    timeout_s="$(config_value CHECK_TIMEOUT_SECONDS)"
     [[ -n "$timeout_s" ]] || timeout_s=180
 
     if has_oniux; then
@@ -393,9 +366,9 @@ cmd_status() {
     "${COMPOSE[@]}" ps
     local host onion_port ssh_port ssh_user
     host="$(tor_hostname | tr -d '\r\n')"
-    onion_port="$(read_env_value ONION_PUBLIC_PORT)"
-    ssh_port="$(read_env_value LOCAL_SSH_PORT)"
-    ssh_user="$(read_env_value SOFT_SERVE_SSH_USER)"
+    onion_port="$(config_value ONION_PUBLIC_PORT)"
+    ssh_port="$(config_value LOCAL_SSH_PORT)"
+    ssh_user="$(config_value SOFT_SERVE_SSH_USER)"
     [[ -n "$ssh_user" ]] || ssh_user='admin'
     if [[ -n "$host" ]]; then
         log "Hidden service hostname: ${host}"
@@ -428,31 +401,32 @@ cmd_config() {
     local sub="${1:-render}"
     case "$sub" in
         render)
-            [[ $# -le 1 ]] || fail "usage: ./run.sh config [render|check|migrate [--apply]]"
+            [[ $# -le 1 ]] || fail "usage: ./run.sh config [render|check|migrate [--apply] [--accept-retired-auxiliary-topology]]"
             require_runtime
-            validate_environment
             "${COMPOSE_CHECK[@]}" --profile check config
             ;;
         check)
             [[ $# -eq 1 ]] || fail "usage: ./run.sh config check"
             require_env_file
             require_cmd python3
-            python3 "$CONFIG_CTL" --env "$ENV_FILE" --schema "$CONFIG_SCHEMA" \
-                --template "$ROOT_DIR/env.example" check
+            configctl_base check
             ;;
         migrate)
             shift
-            [[ $# -le 1 ]] || fail "usage: ./run.sh config migrate [--apply]"
-            [[ $# -eq 0 || "${1:-}" == '--apply' ]] \
-                || fail "usage: ./run.sh config migrate [--apply]"
             require_env_file
             require_cmd python3
             local args=(--env "$ENV_FILE" --schema "$CONFIG_SCHEMA" \
-                --template "$ROOT_DIR/env.example" migrate)
-            [[ $# -eq 0 ]] || args+=(--apply)
+                --template "$ROOT_DIR/env.example" --release-file "$RELEASE_FILE" migrate)
+            local arg
+            for arg in "$@"; do
+                case "$arg" in
+                    --apply|--accept-retired-auxiliary-topology) args+=("$arg") ;;
+                    *) fail "usage: ./run.sh config migrate [--apply] [--accept-retired-auxiliary-topology]" ;;
+                esac
+            done
             python3 "$CONFIG_CTL" "${args[@]}"
             ;;
-        *) fail "usage: ./run.sh config [render|check|migrate [--apply]]" ;;
+        *) fail "usage: ./run.sh config [render|check|migrate [--apply] [--accept-retired-auxiliary-topology]]" ;;
     esac
 }
 
@@ -482,8 +456,12 @@ cmd_doctor() {
 }
 
 cmd_fix_permissions() {
-    require_runtime
+    require_env_file
+    require_cmd python3
+    configctl_base check --ignore-mode >/dev/null \
+        || fail "refusing permission repair for invalid configuration"
     chmod 600 "$ENV_FILE"
+    require_runtime
     OUTPUT_UID="$(maintenance_output_uid)" OUTPUT_GID="$(maintenance_output_gid)" \
         "${COMPOSE_MAINTENANCE[@]}" run --rm --build -T maintenance permissions
     log "Applied private permissions to .env, runtime data, and backups"
@@ -533,7 +511,7 @@ cmd_backup_state() {
     require_services_stopped
     ensure_runtime_directories
     local layout="${1:-current}"
-    local recipient="${2:-$(read_env_value BACKUP_RECIPIENT)}"
+    local recipient="${2:-$(config_value BACKUP_RECIPIENT)}"
     [[ -n "$recipient" ]] \
         || fail "backup recipient missing; pass one or set BACKUP_RECIPIENT in .env"
     case "$layout" in
@@ -552,9 +530,9 @@ cmd_backup() {
 }
 
 cmd_verify_backup() {
-    require_runtime
+    require_release_runtime
     local archive="${1:-}"
-    local identity="${2:-$(read_env_value BACKUP_IDENTITY_FILE)}"
+    local identity="${2:-}"
     [[ -n "$archive" && -n "$identity" ]] \
         || fail "usage: ./run.sh verify-backup <archive> <identity-file>"
     archive="$(realpath "$archive")"
@@ -580,10 +558,9 @@ cmd_restore() {
     require_services_stopped
     ensure_runtime_directories
     local archive="${1:-}"
-    local identity="${2:-$(read_env_value BACKUP_IDENTITY_FILE)}"
+    local identity="${2:-}"
     local mode="${3:-preserve}"
-    [[ -n "$archive" ]] || fail "usage: ./run.sh restore <archive> <identity-file> [preserve|rotate]"
-    [[ -n "$identity" ]] || fail "restore identity missing; pass its file path or set BACKUP_IDENTITY_FILE"
+    [[ -n "$archive" && -n "$identity" ]] || fail "usage: ./run.sh restore <archive> <identity-file> [preserve|rotate]"
     archive="$(realpath "$archive")"
     identity="$(realpath "$identity")"
     [[ -f "$archive" ]] || fail "backup archive not found: $archive"
@@ -621,11 +598,9 @@ cmd_issues() {
 }
 
 cmd_legacy_state() {
-    require_runtime
+    require_release_runtime
     local image
-    image="$(read_env_value ALPINE_IMAGE)"
-    [[ "$image" =~ @sha256:[0-9a-f]{64}$ ]] \
-        || fail "ALPINE_IMAGE must be digest-pinned; run './run.sh sync-pins'"
+    image="$(release_value ALPINE_IMAGE)"
 
     docker run --rm --network none \
         -v "$ROOT_DIR:/repo:ro" \
@@ -636,9 +611,7 @@ cmd_legacy_state() {
 state_inventory_json() (
     local require_legacy="${1:-0}"
     local image tmp output_uid output_gid
-    image="$(read_env_value ALPINE_IMAGE)"
-    [[ "$image" =~ @sha256:[0-9a-f]{64}$ ]] \
-        || fail "ALPINE_IMAGE must be digest-pinned; run './run.sh sync-pins'"
+    image="$(release_value ALPINE_IMAGE)"
     tmp="$(mktemp -d)"
     output_uid="$(maintenance_output_uid)"
     output_gid="$(maintenance_output_gid)"
@@ -672,9 +645,23 @@ state_inventory_json() (
     python3 "$ROOT_DIR/scripts/state-inventory.py" "${args[@]}"
 )
 
+require_default_services_stopped_without_config() {
+    local running
+    running="$(docker ps -q \
+        --filter label=com.docker.compose.project=hidden-git \
+        --filter label=com.docker.compose.service=soft-serve \
+        --filter status=running)"
+    running+="$(docker ps -q \
+        --filter label=com.docker.compose.project=hidden-git \
+        --filter label=com.docker.compose.service=tor \
+        --filter status=running)"
+    [[ -z "$running" ]] \
+        || fail "this operation requires the default HiddenGit services to be stopped"
+}
+
 cmd_state_inventory() {
-    require_runtime
-    require_services_stopped
+    require_release_runtime
+    require_default_services_stopped_without_config
     state_inventory_json 0
 }
 
@@ -711,9 +698,6 @@ print(d["current"]["repository_count"], d["legacy"]["repository_count"])
         || fail "backup recipient file is missing: ${identity}.recipient"
     recipient="$(tr -d '\r\n' < "${identity}.recipient")"
     [[ "$recipient" == age1* ]] || fail 'generated backup recipient is invalid'
-    set_env_value BACKUP_RECIPIENT "$recipient"
-    set_env_value BACKUP_IDENTITY_FILE "$identity"
-
     local current_archive legacy_archive
     current_archive="$(cmd_backup_state current "$recipient")"
     legacy_archive="$(cmd_backup_state legacy "$recipient")"
@@ -726,7 +710,7 @@ print(d["current"]["repository_count"], d["legacy"]["repository_count"])
     timestamp="$(date -u '+%Y%m%dT%H%M%SZ')"
     archive_name="legacy-${timestamp}"
     archive_dir="$ROOT_DIR/retired-state/$archive_name"
-    image="$(read_env_value ALPINE_IMAGE)"
+    image="$(release_value ALPINE_IMAGE)"
     output_uid="$(maintenance_output_uid)"
     output_gid="$(maintenance_output_gid)"
     docker run --rm --network none \
@@ -778,6 +762,9 @@ PY
 }
 
 cmd_restart() {
+    # Validate before down so malformed current config can never stop a working
+    # deployment and then fail before it can be started again.
+    require_runtime
     cmd_down
     cmd_up
 }
@@ -801,14 +788,14 @@ Commands:
             Validate schema and render the fully interpolated Compose configuration
   config check
             Validate the versioned .env schema without Docker or mutation
-  config migrate [--apply]
-            Preview legacy normalization; --apply writes an atomic mode-0600 migration with rollback copy
+  config migrate [--apply] [--accept-retired-auxiliary-topology]
+            Preview/apply schema-v2 migration; non-default retired HTTP/Git/stats topology requires the narrow acknowledgement flag
   doctor    Validate configuration and show actionable best-practice findings
   doctor --strict
             Fail when any best-practice warning remains
   fix-permissions
             Restrict .env, runtime data, and backup directory permissions
-  sync-pins Update reviewed version and digest references without changing local ports
+  sync-pins Compatibility check for tracked config/release.env; never writes .env
   migrate-users [--confirm-existing]
             Assign stable service UIDs; confirmation and a backup are required for existing data
   backup-keygen [identity-file]

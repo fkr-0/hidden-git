@@ -24,7 +24,7 @@ volumes, and a real Tor bootstrap. It must prove:
 - internal SSH is exactly `23231`;
 - host publishes only that internal port to the chosen local port;
 - HTTP/native Git are closed;
-- stats is reachable on Soft Serve loopback but not from the Tor container;
+- stats is closed even inside the Soft Serve container and from sibling/Tor containers;
 - Tor maps the chosen onion virtual port to `soft-serve:23231`;
 - authenticated local SSH and onion SSH both work;
 - forced recreate produces the same managed config.

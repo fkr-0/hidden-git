@@ -2,16 +2,22 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TMP_DIR="$(mktemp -d /tmp/hidden-git-rootless-test.XXXXXX)"
+TMP_DIR="$(mktemp -d)"
 DAEMON_NAME="hidden-git-rootless-dind-$$"
 OUTER_DOCKER_HOST="${DOCKER_HOST:-unix:///var/run/docker.sock}"
 
-read_example() {
-    sed -n "s/^$1=//p" "$ROOT_DIR/env.example" | head -n1
+release_value() {
+    python3 "$ROOT_DIR/scripts/configctl.py" release get "$1"
 }
 
-DIND_IMAGE="$(read_example DIND_ROOTLESS_IMAGE)"
-ALPINE_IMAGE="$(read_example ALPINE_IMAGE)"
+ALPINE_IMAGE="$(release_value ALPINE_IMAGE)"
+GO_IMAGE="$(release_value GO_IMAGE)"
+SOFT_SERVE_VERSION="$(release_value SOFT_SERVE_VERSION)"
+TRIVY_IMAGE="$(release_value TRIVY_IMAGE)"
+BUILDKIT_IMAGE="$(release_value BUILDKIT_IMAGE)"
+DIND_ROOTLESS_IMAGE="$(release_value DIND_ROOTLESS_IMAGE)"
+export ALPINE_IMAGE GO_IMAGE SOFT_SERVE_VERSION TRIVY_IMAGE BUILDKIT_IMAGE DIND_ROOTLESS_IMAGE
+DIND_IMAGE="$DIND_ROOTLESS_IMAGE"
 
 cleanup() {
     DOCKER_HOST="$OUTER_DOCKER_HOST" docker rm -f "$DAEMON_NAME" >/dev/null 2>&1 || true

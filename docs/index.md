@@ -24,7 +24,7 @@ local operator                         │ soft-serve:23231 (SSH)          │
 └──────────────┘                       │   └─ SSH host/client keys        │
                                        │                                 │
                                        │ HTTP/git://: disabled            │
-                                       │ stats: 127.0.0.1:23233 only      │
+                                       │ stats: disabled                  │
                                        └─────────────────────────────────┘
 ```
 

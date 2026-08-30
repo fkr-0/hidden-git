@@ -90,7 +90,7 @@ tracked separately in =issues.yml=.
 | =doctor=  | Validate Docker, environment values, directories, Compose, and best-practice posture. |
 | =doctor --strict= | Treat every best-practice warning as a failure. |
 | =fix-permissions= | Restrict local environment, data, and backup modes. |
-| =sync-pins= | Update reviewed release references without changing local ports or keys. |
+| =sync-pins= | Compatibility check for tracked release metadata; never rewrites =.env=. |
 | =migrate-users= | Assign persistent data to the dedicated service UIDs. |
 | =backup-keygen= | Generate an offline age identity and public recipient. |
 | =backup= | Create an encrypted, integrity-checked stopped-state backup. |
@@ -118,28 +118,35 @@ Configuration is versioned independently from the software release by
 =HIDDEN_GIT_CONFIG_VERSION=. Current files must pass =./run.sh config check=.
 Older environment files are migration inputs rather than silently compatible
 Compose inputs: preview them with =./run.sh config migrate= and apply only after
-review with =./run.sh config migrate --apply=. Unknown, duplicate, malformed,
-and ambiguous values fail before Compose can interpret them differently.
+review with =./run.sh config migrate --apply=. A legacy non-default HTTP/Git/stats
+topology is =BLOCKED_LOSSY= until the narrow
+=--accept-retired-auxiliary-topology= acknowledgement is supplied. Unknown,
+duplicate, malformed, ambiguous, and unsupported values fail before Compose can
+interpret them differently.
 
 ** Images and versions
 
-- =HIDDEN_GIT_VERSION= :: Project release version; must match =VERSION=.
-- =ALPINE_IMAGE= :: Minimal runtime base for every release image, pinned by
-  multi-architecture OCI digest.
-- =GO_IMAGE= :: Go builder image, pinned by multi-architecture OCI digest.
-- =SOFT_SERVE_VERSION= :: Pinned upstream Soft Serve release; current release
-  source targets =v0.12.2=.
-- =SOFT_SERVE_*_VERSION= :: Explicit reviewed dependency versions aligned with
-  the selected upstream Soft Serve graph. They are release-managed, not normal
-  deployment knobs.
-- =TRIVY_IMAGE= :: Digest-pinned scanner used only for release evidence.
-- =BUILDKIT_IMAGE= :: Digest-pinned BuildKit worker used for provenance builds.
+=VERSION= is the sole HiddenGit project-version authority. Non-secret
+release/build metadata is tracked separately in =config/release.env=:
+
+- =ALPINE_IMAGE= :: Minimal runtime base for every release image, digest pinned.
+- =GO_IMAGE= :: Go builder image, digest pinned.
+- =SOFT_SERVE_VERSION= :: Reviewed upstream release, currently =v0.12.2=.
+- =TRIVY_IMAGE= :: Digest-pinned release scanner.
+- =BUILDKIT_IMAGE= :: Digest-pinned provenance builder.
+- =DIND_ROOTLESS_IMAGE= :: Digest-pinned rootless qualification daemon.
+
+The operator =.env= cannot override these values. HiddenGit builds the reviewed
+upstream Soft Serve v0.12.2 module graph directly and verifies it with =go mod
+verify=; there are no downstream Go dependency override knobs in schema v2.
 
 ** Service identity and access
 
 - =SOFT_SERVE_NAME= :: Name shown in the Soft Serve UI.
 - =SOFT_SERVE_INITIAL_ADMIN_KEYS= :: Required administrator SSH public keys on
-  first boot. Existing databases do not require it again.
+  first boot. Once the database exists, the entrypoint suppresses this variable
+  before executing Soft Serve so stale bootstrap keys cannot retain server-admin
+  authority. Clear the field declaratively after bootstrap.
 - =SOFT_SERVE_SSH_USER= :: Username used only by readiness probes.
 
 ** Network intent
@@ -157,8 +164,8 @@ and ambiguous values fail before Compose can interpret them differently.
 Internal ports are no longer public configuration. The data path, Tor target,
 CI mode, Soft Serve SSH/HTTP/stats/Git ports, protocol enablement, and LFS policy
 are managed product invariants. The default generated config enables SSH on
-=:23231=, disables HTTP and native =git://=, keeps stats on
-=127.0.0.1:23233=, and disables LFS/SSH-LFS.
+=:23231= and disables HTTP, native =git://=, stats, LFS, and SSH-LFS. The stats
+listen address remains deterministic loopback only as inert upstream config.
 
 ** Runtime and checks
 
@@ -173,23 +180,25 @@ values are handled only by =config migrate=; they are not current settings.
 
 - =BACKUP_RECIPIENT= :: Public age recipient used to encrypt backups. The
   matching identity must remain offline and outside this repository.
-- =BACKUP_IDENTITY_FILE= :: Optional local default identity path for restore.
+
+The age identity path is never persisted in current =.env=. Pass it explicitly
+to =verify-backup= and =restore= when needed.
 
 Run =./run.sh doctor= for actionable PASS/WARN/FAIL output. It reports valid but
 risky choices such as non-loopback publication, permissive secret directories,
 mutable dependency references, stale backups, or a non-rootless Docker daemon.
 =./run.sh doctor --strict= turns warnings into a non-zero exit status.
 
-Existing deployments can adopt reviewed version and digest references without
-changing deployment intent:
+Release pins are already tracked in the checkout. The historical command remains
+as a compatibility check only:
 
 #+begin_src sh
 ./run.sh sync-pins
 #+end_src
 
-=sync-pins= is deliberately separate from schema migration. It creates a private
-rollback copy and refreshes release-managed inputs, but does not pretend an old
-schema became current. Use =config migrate= for that transformation.
+=sync-pins= validates =config/release.env= and the current v2 operator config,
+but writes no =.env= bytes and creates no rollback copy. Use =config migrate= to
+move a historical environment file to schema v2.
 
 * Encrypted backup and restore
 
@@ -324,7 +333,9 @@ random local ports, and disposable named volumes:
 ./tests/e2e.sh
 #+end_src
 
-This validates database initialization, the generated Soft Serve configuration,
+This validates database initialization, generated-config authority, closed
+HTTP/Git/stats sockets, exact host/Tor SSH routing, clone-metadata divergence,
+bootstrap-key suppression after DB creation, low-privilege global-admin denial,
 authenticated local SSH, and authenticated SSH through the onion service without
 touching =./data= or =.env=. Set =KEEP_E2E_ARTIFACTS=1= to retain failure logs.
 

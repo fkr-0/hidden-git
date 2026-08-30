@@ -85,7 +85,7 @@ audit_environment_permissions() {
 
 audit_host_binding() {
     local bind
-    bind="$(read_env_value HOST_BIND_ADDRESS)"
+    bind="$(config_value HOST_BIND_ADDRESS)"
     [[ -n "$bind" ]] || bind='127.0.0.1'
     case "$bind" in
         127.0.0.1|localhost|::1|'[::1]')
@@ -102,29 +102,37 @@ audit_host_binding() {
 audit_image_pinning() {
     local key value failures=0
     for key in ALPINE_IMAGE GO_IMAGE TRIVY_IMAGE BUILDKIT_IMAGE DIND_ROOTLESS_IMAGE; do
-        value="$(read_env_value "$key")"
+        value="$(release_value "$key")"
         if [[ "$value" =~ @sha256:[0-9a-f]{64}$ ]]; then
             continue
         fi
         failures=1
         ui_status WARN 'image digest pinning' \
             "$key is not pinned to an OCI digest" \
-            "run './run.sh sync-pins' to adopt reviewed release references"
+            "repair tracked config/release.env from the reviewed release source"
     done
     ((failures == 1)) || ui_status PASS 'image digest pinning' 'release base images are immutable'
 }
 
 audit_admin_key() {
     local keys
-    keys="$(read_env_value SOFT_SERVE_INITIAL_ADMIN_KEYS)"
-    if ! runtime_contains_state && [[ -z "$keys" ]]; then
+    keys="$(config_value SOFT_SERVE_INITIAL_ADMIN_KEYS)"
+    local established=0
+    runtime_contains_state && established=1
+    if [[ "$established" == 0 && -z "$keys" ]]; then
         ui_status FAIL 'initial administrator' \
             'fresh deployment has no administrator public key' \
             'set SOFT_SERVE_INITIAL_ADMIN_KEYS to a complete SSH public key'
         return
     fi
+    if [[ "$established" == 1 && -n "$keys" ]]; then
+        ui_status WARN 'initial administrator' \
+            'established database still has a bootstrap key in .env; runtime suppression makes it inert' \
+            'clear SOFT_SERVE_INITIAL_ADMIN_KEYS declaratively after bootstrap'
+        return
+    fi
     if [[ -z "$keys" ]]; then
-        ui_status INFO 'initial administrator' 'database already exists; bootstrap key is no longer required'
+        ui_status INFO 'initial administrator' 'database already exists; bootstrap key is cleared'
     elif [[ "$keys" == ssh-ed25519\ * || "$keys" == sk-ssh-ed25519@openssh.com\ * ]]; then
         ui_status PASS 'administrator key type' 'modern Ed25519 key configured'
     elif [[ "$keys" == ssh-rsa\ * ]]; then

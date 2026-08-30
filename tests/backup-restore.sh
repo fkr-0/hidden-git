@@ -3,11 +3,12 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IMAGE="hidden-git-maintenance-test-$$"
-TMP_DIR="$(mktemp -d /tmp/hidden-git-backup-test.XXXXXX)"
+TMP_DIR="$(mktemp -d)"
+ALPINE_IMAGE="$(python3 "$ROOT_DIR/scripts/configctl.py" release get ALPINE_IMAGE)"
 
 cleanup() {
     docker run --rm -v "$TMP_DIR:/work" \
-        "$(sed -n 's/^ALPINE_IMAGE=//p' "$ROOT_DIR/env.example")" \
+        "$ALPINE_IMAGE" \
         sh -lc 'chmod -R a+rwX /work' >/dev/null 2>&1 || true
     rm -rf "$TMP_DIR"
     docker image rm "$IMAGE" >/dev/null 2>&1 || true
@@ -20,7 +21,8 @@ printf 'database fixture\n' > "$TMP_DIR/data/soft-serve/soft-serve.db"
 printf 'repository fixture\n' > "$TMP_DIR/data/soft-serve/repos/demo.git"
 printf 'onion identity fixture\n' > "$TMP_DIR/data/tor/hidden_service/hs_ed25519_secret_key"
 
-docker build -q -f "$ROOT_DIR/Dockerfile.maintenance" -t "$IMAGE" "$ROOT_DIR" >/dev/null
+docker build -q --build-arg "ALPINE_IMAGE=$ALPINE_IMAGE" \
+    -f "$ROOT_DIR/Dockerfile.maintenance" -t "$IMAGE" "$ROOT_DIR" >/dev/null
 
 docker run --rm -v "$TMP_DIR/keys:/keys" \
     -e "OUTPUT_UID=$(id -u)" -e "OUTPUT_GID=$(id -g)" \

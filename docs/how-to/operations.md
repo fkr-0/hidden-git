@@ -75,16 +75,16 @@ ONION_PUBLIC_PORT=8022
 
 Then restart and update client SSH config. The Tor target remains `soft-serve:23231`.
 
-## Adopt reviewed release pins
+## Check reviewed release pins
 
 ```sh
 ./run.sh sync-pins
 ```
 
-This creates a private rollback copy and updates release-managed values from the
-checked-out `env.example`. It preserves deployment intent such as local/onion
-ports, name, public SSH URL, and recovery settings. If the schema itself changed,
-run `config migrate` as a separate explicit step.
+This validates tracked `config/release.env` and the current operator config. It
+does not change `.env` or create a rollback copy. Release pins are source-owned;
+use normal source review/update workflow to change them. If the operator schema
+changed, run `config migrate` as a separate explicit step.
 
 ## Repair modes
 

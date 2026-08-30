@@ -10,7 +10,7 @@ title: Networking reference
 |---|---|---|---|
 | host | `HOST_BIND_ADDRESS:LOCAL_SSH_PORT` | loopback by default | local operator SSH |
 | Compose network | `soft-serve:23231` | Tor + project services | authenticated SSH/Git transport |
-| Soft Serve container | `127.0.0.1:23233` | same container only | stats |
+| Soft Serve container | `127.0.0.1:23233` | disabled listener config | inert stats address, not active |
 | Soft Serve container | `127.0.0.1:23232` | disabled listener config | reserved HTTP topology, not active |
 | Soft Serve container | `127.0.0.1:9418` | disabled listener config | native Git daemon, not active |
 | Tor virtual service | `<onion>:ONION_PUBLIC_PORT` | Tor clients | maps to `soft-serve:23231` |
@@ -44,12 +44,13 @@ answers “where should Soft Serve listen?”; that last fact is an implementati
 constant. Separating these domains removes an invariant rather than synchronizing
 two values forever.
 
-## Why stats is localhost inside the container
+## Why stats is disabled
 
-Statistics are useful for health/diagnostics but are not part of the product
-client API. Binding `:23233` would expose them to every peer on the Compose
-network. `127.0.0.1:23233` keeps them reachable only from the Soft Serve
-container unless a future observability design deliberately adds a collector.
+Statistics are not part of the current HiddenGit product contract and no consumer
+requires them, so Soft Serve stats are disabled entirely. The template retains
+`127.0.0.1:23233` only as deterministic inert upstream configuration. A future
+observability design must explicitly re-enable the service, define its minimum
+reachability, and add positive/negative E2E probes.
 
 ## Why native `git://` is disabled
 

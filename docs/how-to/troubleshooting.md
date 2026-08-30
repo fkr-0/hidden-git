@@ -13,8 +13,14 @@ Start at the earliest failing layer. Avoid changing several values at once.
 | duplicate key | `.env` has ambiguous semantics | remove the duplicate or migrate from an unambiguous rollback copy |
 | unknown key | likely typo or unsupported historical option | correct the typo; use `config migrate` for known legacy keys |
 | legacy key requires migration | file predates current schema | run `./run.sh config migrate` |
-| release-managed key differs | local pins drift from checked-out release | run `./run.sh sync-pins` after reviewing source/release |
+| release-owned key appears in `.env` | old schema or attempted operator override | preview/apply `config migrate`; release pins belong to tracked `config/release.env` |
+| tracked release metadata invalid | checked-out `config/release.env` is malformed or unreviewed | restore/review the tracked release file; `sync-pins` only validates it |
 | invalid port/URL | type/range validation failed | correct the user-intent value |
+
+If migration reports `BLOCKED_LOSSY`, a non-default historical HTTP/Git/stats
+field would be retired. Ordinary `--apply` is intentionally non-mutating.
+Preserve the old behavior in a reviewed extension if required; otherwise use
+the narrow `--accept-retired-auxiliary-topology` acknowledgement.
 
 Migration failure is intentionally non-mutating. For a legacy mismatch such as
 `SOFT_SERVE_SSH_PORT != ONION_TARGET_PORT`, determine which old endpoint was

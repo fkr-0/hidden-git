@@ -7,8 +7,9 @@ hardening, key management, encrypted backups, or a reviewed threat model.
 
 Run `./run.sh config check` before Compose and `./run.sh doctor` before starting
 or upgrading the stack. Schema validation rejects duplicate, unknown, stale,
-malformed, and release-pin-drifted configuration before different consumers can
-interpret it differently. `doctor` distinguishes invalid configuration from
+malformed, and operator-owned release-pin configuration before different consumers can
+interpret it differently; tracked `config/release.env` is validated through the
+same parser boundary. `doctor` distinguishes invalid configuration from
 risky-but-valid runtime choices and prints a concrete fix for every warning.
 Use `./run.sh doctor --strict` in release reviews and automation when warnings
 should fail the check.
@@ -17,12 +18,18 @@ The audit covers secret permissions, loopback-only publication, immutable
 dependency references, administrator-key posture, Docker isolation, explicit
 container users, and encrypted-backup freshness.
 
-Use `./run.sh sync-pins` to adopt reviewed release and scanner digests while
-preserving deployment intent. It is not a schema migration. For a historical
-`.env`, first use `./run.sh config migrate` to preview the secret-safe transform;
+`./run.sh sync-pins` is retained only as a non-mutating compatibility check for
+the tracked release metadata. For a historical `.env`, use `./run.sh config
+migrate` to preview the secret-safe transform;
 `--apply` creates a private rollback copy and atomically converges only the
 declarative environment file. Ambiguous inputs fail before mutation, and a
 second apply must be a no-op.
+
+Non-default legacy HTTP/Git/stats ports or public URLs are treated as evidence
+of intentional topology and reported as `BLOCKED_LOSSY`. Ordinary `--apply`
+creates no rollback copy and writes no bytes. Preserve needed behavior in a
+separately reviewed extension, or explicitly acknowledge only that retirement
+with `--accept-retired-auxiliary-topology`.
 
 `./run.sh fix-permissions` repairs local file and directory modes without
 deleting or rewriting runtime content.
@@ -59,7 +66,14 @@ The default product profile intentionally exposes authenticated SSH only:
 - Tor maps `ONION_PUBLIC_PORT` to `soft-serve:23231`;
 - HTTP and native `git://` are disabled;
 - LFS and SSH LFS are disabled;
-- stats is bound only to `127.0.0.1:23233` inside the Soft Serve container.
+- stats is disabled entirely and opens no `23233` socket, including inside the Soft Serve container.
+
+`SOFT_SERVE_INITIAL_ADMIN_KEYS` is a first-boot mechanism, not durable policy.
+Soft Serve v0.12.2 still consults configured initial admin keys for server-admin
+authorization after a DB exists, so HiddenGit unsets the variable before
+executing Soft Serve whenever `soft-serve.db` already exists. `doctor` warns if
+an established `.env` still carries a value; clear it declaratively. Runtime
+suppression is the fail-safe and does not modify DB users or admin flags.
 
 Widening `HOST_BIND_ADDRESS` or enabling an auxiliary protocol is an advanced
 security decision, not normal port configuration, and requires its own threat
@@ -91,13 +105,12 @@ the package surface small.
 
 Release 0.1.3 targets Soft Serve v0.12.2 so the
 application-level security fixes delivered in v0.12.0-v0.12.2 are included. The
-explicit Go dependency versions are aligned to the selected v0.12.2 upstream
-module graph at review time rather than carrying v0.11.6-era overrides forward
-blindly. Future Soft Serve upgrades must repeat that source/module/security
-review; dependency overrides are not a substitute for an upstream application
-fix.
-
-Every override remains explicitly versioned and recorded in build provenance.
+five historical downstream dependency overrides matched the selected v0.12.2
+module graph exactly and have therefore been removed. The build consumes the
+reviewed upstream `go.mod`/`go.sum` graph directly and runs `go mod verify`.
+Future Soft Serve upgrades must repeat the source/module/security review; a
+future downstream override would require its own tracked rationale and removal
+condition rather than becoming an operator `.env` knob.
 
 The Soft Serve healthcheck validates the service's managed internal SSH banner
 on `127.0.0.1:23231` directly. No SSH client is installed in that runtime image,

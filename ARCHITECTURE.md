@@ -59,7 +59,7 @@ The `soft-serve` container provides the Git forge and SSH UI.
 - Repositories, SQLite state, and SSH identities persisted under `data/soft-serve/`.
 - Managed SSH listener fixed at `:23231`; `LOCAL_SSH_PORT` controls only the loopback-facing host mapping.
 - HTTP, native `git://`, LFS, and SSH LFS disabled in the default profile.
-- Statistics bound to `127.0.0.1:23233` inside the container and not host-published.
+- Statistics disabled entirely. `127.0.0.1:23233` remains only an inert deterministic upstream listen value and no stats socket is opened.
 - `/run/hidden-git/soft-serve.config.yaml` is regenerated on every start and explicitly selected with `SOFT_SERVE_CONFIG_LOCATION`, so stale persistent config cannot regain authority.
 
 ### Tor
@@ -103,9 +103,9 @@ The one-shot checker joins Tor's network namespace and verifies authenticated SS
 
 ### First boot
 
-1. `./run.sh init` creates a private schema-v1 `.env` and runtime directories.
+1. `./run.sh init` creates a private schema-v2 `.env` and runtime directories.
 2. The operator supplies at least one complete administrator SSH public key.
-3. `./run.sh config check` rejects duplicate, unknown, stale, malformed, or release-pin-drifted configuration before Docker is needed.
+3. `./run.sh config check` rejects duplicate, unknown, stale, or malformed operator configuration and also validates tracked `config/release.env` before Docker is needed.
 4. `./run.sh doctor` validates configuration, permissions, pinning, and runtime posture.
 5. `./run.sh up` migrates only empty fresh state ownership, starts Soft Serve, waits for fixed internal SSH `23231`, starts Tor, and verifies onion SSH reachability.
 
@@ -149,8 +149,8 @@ The choice is explicit because accidental identity replacement permanently chang
 | Host to containers | reviewed Compose and images | container workload | non-root users, read-only roots, dropped capabilities |
 | Runtime state to Git | ignored private directories | repository history/build context | `.gitignore`, `.dockerignore`, hygiene tests |
 | Backup to recovery key | offline age identity | backup storage | authenticated encryption and checksums |
-| Configuration to Compose/runtime | schema-v1 validated intent | malformed/legacy `.env` input | duplicate/unknown rejection, explicit migration, fixed internal topology |
-| Source to release artifact | pinned build inputs | registries and upstream source | digest pinning, SBOM, provenance, vulnerability gate |
+| Configuration to Compose/runtime | schema-v2 validated intent | malformed/legacy `.env` input | one parser, duplicate/unknown rejection, explicit migration, fixed internal topology |
+| Source to release artifact | tracked `config/release.env` | registries and upstream source | immutable image pins, exact Soft Serve release, SBOM, provenance, vulnerability gate |
 | Release source to public docs | exact published release tag | mutable repository branches | tag/version verification, pinned Pages actions, `github-pages` environment |
 
 ## Persistent state
@@ -169,15 +169,15 @@ The Soft Serve and Tor trees form one logical recovery unit. Backing up only one
 Release checks enforce or document these invariants:
 
 1. `VERSION` is the canonical project version.
-2. `VERSION`, `env.example`, the README subtitle, and `CHANGELOG.md` agree.
+2. `VERSION` is not duplicated into `.env`; the README subtitle and dated changelog release agree with it.
 3. Release tags use the exact annotated form `v<SemVer>`.
 4. Runtime state, local environment files, private keys, databases, backups, and generated evidence are not tracked or copied into image contexts.
-5. Fresh initialization requires an administrator public key.
+5. Fresh initialization requires an administrator public key; after the database exists, bootstrap keys are removed from the Soft Serve process environment before exec.
 6. The default host publication is loopback SSH only; internal SSH is fixed at `23231`.
 7. Tor always targets `soft-serve:23231`; `ONION_TARGET_PORT` is not operator configuration.
 8. HTTP, native `git://`, LFS, and SSH LFS are disabled unless a reviewed extension changes the product profile.
-9. Configuration is versioned and rejects duplicates, unknown keys, unsupported legacy keys, and drifted release pins before Compose.
-10. Declarative config migration is preview-first, atomic, rollback-backed, and second-apply idempotent; it never mutates application state.
+9. Configuration is versioned and rejects duplicates, unknown keys, unsupported legacy keys, and operator attempts to own release pins before Compose.
+10. Declarative config migration is preview-first, atomic, rollback-backed, and second-apply idempotent; non-default retired HTTP/Git/stats topology requires the narrow lossy-retirement acknowledgement and migration never mutates application state.
 11. Connectivity checks always terminate.
 12. Existing non-empty state is never silently re-owned or overwritten.
 13. Restore requires an empty destination and an explicit identity policy.
@@ -192,7 +192,9 @@ Release checks enforce or document these invariants:
 | Invalid/current-schema `.env` | startup fails before Compose/service mutation | fix current values; for known legacy input preview `config migrate` |
 | Duplicate/unknown `.env` key | schema validation fails before Compose can choose different semantics | remove typo/duplicate or recover from an unambiguous rollback copy |
 | Deterministic legacy `.env` | current check refuses it | preview `config migrate`, then explicitly apply and verify second-pass no-op |
+| Non-default retired HTTP/Git/stats legacy topology | migration reports `BLOCKED_LOSSY` and ordinary apply creates no backup/write | preserve behavior in a separately reviewed extension if required; otherwise acknowledge only that retirement with `--accept-retired-auxiliary-topology` |
 | Missing first admin key | fresh startup refuses initialization | add a complete SSH public key |
+| Stale bootstrap key on existing DB | doctor warns; runtime suppresses it from Soft Serve regardless | clear `SOFT_SERVE_INITIAL_ADMIN_KEYS` declaratively after bootstrap |
 | Soft Serve unhealthy | Tor remains blocked | inspect logs and local SSH listener |
 | Tor bootstrap timeout | command exits with diagnostics | inspect Tor logs/network reachability |
 | Onion SSH timeout | finite failure | inspect status, bootstrap, and key/user settings |

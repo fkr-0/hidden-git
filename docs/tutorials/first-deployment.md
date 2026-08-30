@@ -47,6 +47,9 @@ SOFT_SERVE_INITIAL_ADMIN_KEYS="ssh-ed25519 AAAA... operator@example"
 
 The field is bootstrap-only. It is required while the first database is being
 created; it is not a private-key store and must never contain the private key.
+After the DB exists, HiddenGit suppresses this variable from the Soft Serve
+process environment even if `.env` still contains it. Create/persist the intended
+Soft Serve admin user, then clear `SOFT_SERVE_INITIAL_ADMIN_KEYS` declaratively.
 
 ## 4. Review operator intent
 
@@ -73,7 +76,8 @@ onion port. Both map to internal SSH `23231`.
 ```
 
 `config check` is Docker-free and fails on duplicate, unknown, stale, malformed,
-or release-pin-drifted configuration. `config` additionally renders Compose.
+or release-owned operator configuration; it also validates tracked
+`config/release.env`. `config` additionally renders Compose.
 `doctor` evaluates operational posture such as file modes, loopback publication,
 container users, backup freshness, and Docker isolation.
 
@@ -153,5 +157,7 @@ as recoverable.
 - `status` reports the expected onion port.
 - local SSH authenticates with the intended key.
 - onion SSH authenticates with the same Soft Serve account.
+- the bootstrap key has been persisted to the intended DB admin account and
+  removed from `.env` after bootstrap.
 - `.env`, `data/`, and the age identity are absent from Git.
 - a verified encrypted backup exists off-host.

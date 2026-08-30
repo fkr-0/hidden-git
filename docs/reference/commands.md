@@ -9,9 +9,10 @@ title: Command reference
 | Command | Mutates? | Requires Docker? | Purpose |
 |---|---|---|---|
 | `init` | yes, local files | no | Create private `.env` and state directories; refuses overwrite. |
-| `config check` | no | no | Validate exact schema, keys, types, pins, duplicates, and mode. |
+| `config check` | no | no | Validate exact v2 operator schema plus tracked release metadata, duplicates, types, and mode. |
 | `config migrate` | no | no | Secret-safe preview of legacy-to-current config convergence. |
 | `config migrate --apply` | `.env` only | no | Private rollback + atomic canonical rewrite; idempotent. |
+| `config migrate --apply --accept-retired-auxiliary-topology` | `.env` only | no | Acknowledge retirement of non-default legacy HTTP/Git/stats topology; cannot bypass any other invalid state. |
 | `config` / `config render` | no | yes | Schema-check then render full Compose config. |
 | `doctor [--strict]` | creates missing dirs; otherwise audit | yes | Operational posture audit; strict turns warnings into failure. |
 | `up` | yes | yes | Build/start/wait/verify complete onion SSH path. |
@@ -21,14 +22,14 @@ title: Command reference
 | `logs` | no | yes | Follow Compose logs. |
 | `test` | no application mutation | yes | Bounded live onion SSH connectivity test. |
 | `build` | images/cache | yes | Build release images using current reviewed config. |
-| `sync-pins` | `.env` | no Docker execution | Backup `.env`, replace release-managed values. |
+| `sync-pins` | no | no Docker execution | Compatibility validation of tracked `config/release.env`; never writes `.env`. |
 | `fix-permissions` | modes | yes | Repair supported private modes. |
 | `migrate-users` | ownership | yes | Stable service UID migration; existing state requires confirmation. |
 | `backup-keygen` | recovery key files | yes | Create age identity + recipient; move identity offline. |
 | `backup` | backup artifacts | yes | Stopped-state encrypted backup of current deployment. |
 | `backup-state` | backup artifacts | yes | Explicit current/legacy layout backup. |
-| `verify-backup` | no application state | yes | Decrypt and validate archive/manifest without restoring. |
-| `restore` | persistent state | yes | Restore only into empty target, preserve or rotate onion identity. |
+| `verify-backup <archive> <identity>` | no application state | yes | Decrypt and validate archive/manifest using an explicit identity path; no `.env` fallback. |
+| `restore <archive> <identity> [preserve|rotate]` | persistent state | yes | Restore only into empty target with explicit recovery identity, preserve or rotate onion identity. |
 | `legacy-state` | no | yes | Secret-safe comparison of old/current layouts. |
 | `state-inventory` | no | yes | Secret-safe repository/user metadata from stopped DB copies. |
 | `reconcile-state` | destructive archival/migration | yes | Guarded, backed-up legacy-state retirement. |

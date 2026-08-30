@@ -4,71 +4,130 @@ title: Explanation — configuration lifecycle
 
 # Configuration lifecycle and upgrade contract
 
+## Two ownership domains
+
+Schema v2 separates two declarative inputs that have different owners:
+
+```text
+operator .env                         tracked config/release.env
+─────────────                         ──────────────────────────
+network/public intent                 immutable image references
+bootstrap key                         Soft Serve v0.12.2
+clone metadata                        release scanner/builder
+checks/recovery recipient             rootless qualification image
+       │                                      │
+       └──────── scripts/configctl.py ─────────┘
+                         │
+                         v
+                 validated consumers
+```
+
+The operator file cannot override tracked release keys. `VERSION` is the sole
+HiddenGit project-version authority.
+
 ## State machine
 
 ```text
-                     ┌──────────────┐
-        init ───────> │ schema v1    │ <──── migration apply
-                     │ canonical    │
-                     └──────┬───────┘
-                            │ config check
-                            v
-                     ┌──────────────┐
-                     │ Compose-safe │
-                     └──────┬───────┘
-                            │ up
-                            v
-                     managed runtime config
-
-legacy / malformed
-       │
-       ├─ duplicate/unknown/ambiguous ──> FAIL, no write
-       │
-       └─ deterministic legacy ──> preview ──> explicit --apply ──> canonical
+parse
+ |
+ +-- duplicate/malformed ------------------------------> INVALID / no write
+ |
+ +-- syntactically valid
+      |
+      +-- current v2 ----------------------------------> CURRENT / no-op
+      |
+      +-- known v1/legacy
+      |     |
+      |     +-- deterministic -------------------------> MIGRATABLE
+      |     |
+      |     +-- non-default retired auxiliary --------> BLOCKED_LOSSY
+      |                                                   |
+      |                               explicit acknowledgement?
+      |                                   no -> no write
+      |                                   yes -> MIGRATABLE_ACK
+      |
+      +-- unknown/conflicting/unsupported/future ------> INVALID/UNSUPPORTED
 ```
 
-## Parse before Compose
+## Parse before action
 
-`.env` is intentionally parsed by HiddenGit before Docker Compose for commands
-that can start/build/render the stack. This closes a historical class of
-split-brain bugs where different consumers could choose different duplicate
-assignments or defaults.
+`scripts/configctl.py` is the authoritative parser for operator configuration and
+tracked release metadata. Commands that consume current deployment configuration
+validate it before Compose or mutation. This closes the historical split-brain
+class where a shell first-match reader and Compose could select different
+assignments.
 
-The parser does not `source` or `eval` `.env`; it accepts a controlled assignment
-syntax and treats content as data.
+The parser never `source`s or `eval`s `.env`; it accepts a controlled assignment
+syntax and treats content as data. Duplicate, unknown, malformed, stale, and
+release-owned current keys fail closed.
 
-## Schema version
+`restart` deliberately validates before `down`: invalid config cannot stop a
+working stack and then fail to bring it back.
 
-`HIDDEN_GIT_CONFIG_VERSION` describes the public environment contract. It is
-different from `HIDDEN_GIT_VERSION`: software may make patch releases without a
-schema change, while a future schema revision may require explicit migration.
+## Schema version versus release version
 
-## `sync-pins` is not schema migration
+`HIDDEN_GIT_CONFIG_VERSION=2` describes the public operator contract. `VERSION`
+describes the HiddenGit software release. Release/build pins are tracked in
+`config/release.env`; they are not operator config and there is no
+`HIDDEN_GIT_VERSION` duplicate.
 
-`sync-pins` refreshes release-managed values. It intentionally does not stamp a
-new config schema over an old file, because that could claim compatibility
-without removing or translating legacy keys. Upgrade sequence is:
+## Lossy legacy auxiliary topology
 
-1. preview/apply schema migration when needed;
-2. validate canonical config;
-3. keep release pins aligned with checked-out source;
-4. perform state migrations separately if the release requires them.
+Historical default HTTP/Git/stats fields can retire automatically because they
+represent the old default surface. A non-default historical HTTP, stats, or
+native-Git port, or an HTTP/Git public URL, is evidence of operator intent.
+Migration reports those key names as `BLOCKED_LOSSY` without printing their
+values.
 
-## Idempotency
+Ordinary `config migrate --apply` fails before backup or write. After preparing a
+separately reviewed extension if the old behavior must survive, an operator may
+acknowledge retirement with:
 
-Canonical output order comes from `env.example`. After a successful apply:
+```sh
+./run.sh config migrate --apply --accept-retired-auxiliary-topology
+```
 
+That flag is not a force switch. It cannot bypass duplicate/unknown/malformed
+configuration, old/new SSH conflicts, mismatched old SSH/Tor targets,
+unsupported data paths, or future schema versions.
+
+## Release metadata and `sync-pins`
+
+`config/release.env` is source-controlled release metadata. `sync-pins` remains
+only for command compatibility: it validates the current v2 operator config and
+tracked release file and writes no `.env` bytes. Changing release pins is a
+source-review operation, not an operator mutation.
+
+The five historical downstream Soft Serve dependency overrides were removed
+because they matched the selected v0.12.2 graph. The Dockerfile builds upstream
+v0.12.2 directly and verifies its module graph rather than mutating it with
+`go get`.
+
+## Serializer and idempotency
+
+Legacy migration renders canonical order/comments from `env.example`; it does
+not preserve historical comments/order. After a successful apply:
+
+- a mode-0600 rollback copy exists in the same directory;
+- replacement is same-directory atomic and fsynced;
+- application state is untouched;
 - applying again writes nothing;
 - file bytes remain identical;
 - no new rollback copy appears;
 - no service restart occurs as a side effect.
 
-This makes config convergence mechanically testable rather than a claim based on
-visual inspection.
+## Bootstrap administrator lifecycle
 
-## Confirmation policy
+A missing DB requires a nonempty `SOFT_SERVE_INITIAL_ADMIN_KEYS`. Once the DB
+exists, HiddenGit removes this variable from the Soft Serve process environment
+before exec because upstream v0.12.2 still treats configured initial keys as
+server-admin authority. This suppression does not create, delete, or change DB
+users/admin flags. `doctor` warns when an established `.env` still contains a
+bootstrap value so the operator can clear it declaratively.
 
-Config apply is explicit but non-interactive because it is narrowly scoped,
-pre-viewable, atomic, rollback-backed, and never mutates runtime state. In
-contrast, ownership migration, reconciliation, or restore can alter persistent
-state/identity and therefore keep stronger gates and stopped-stack requirements.
+## Recovery identity lifecycle
+
+`BACKUP_RECIPIENT` may remain public recovery intent in `.env`. The age identity
+path is not current declarative config: `verify-backup` and `restore` require an
+explicit identity argument, and reconciliation does not persist an identity path
+into `.env`.

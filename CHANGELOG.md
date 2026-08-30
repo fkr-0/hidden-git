@@ -7,6 +7,46 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- Configuration schema v2 separates operator/bootstrap/diagnostic/recovery
+  intent from tracked non-secret release metadata in `config/release.env`.
+- Loss-aware migration classifies non-default historical HTTP/Git/stats ports
+  and HTTP/Git public URLs as `BLOCKED_LOSSY`; ordinary apply performs no backup
+  or write, while `--accept-retired-auxiliary-topology` acknowledges only that
+  specific retirement.
+- Isolated E2E coverage for bootstrap-key suppression after database creation,
+  explicit clone-metadata divergence, closed stats from every container scope,
+  and low-privilege denial of global Soft Serve administration.
+
+### Changed
+
+- Release pins are source-owned by `config/release.env`; `VERSION` is the sole
+  HiddenGit project-version authority and `sync-pins` is now non-mutating
+  compatibility validation.
+- The five v0.12.2-aligned downstream Go dependency overrides and their
+  Compose/Dockerfile plumbing are removed; Soft Serve builds the reviewed
+  upstream v0.12.2 module graph directly with module verification.
+- Backup verification/restore require explicit recovery identity paths, and
+  reconciliation no longer persists an identity path into `.env`.
+- Qualification scratch uses caller `$TMPDIR`/`mktemp` rather than fixed global
+  temporary paths.
+
+### Fixed
+
+- Every current deployment-config consumer now crosses `scripts/configctl.py`
+  before Compose or config-dependent mutation; restart validates before down.
+- Soft Serve stats are fully disabled rather than merely container-loopback
+  reachable.
+
+### Security
+
+- Existing databases cause the entrypoint to remove
+  `SOFT_SERVE_INITIAL_ADMIN_KEYS` from Soft Serve's process environment before
+  exec, preventing a stale/changed bootstrap key from regaining global server
+  administration through upstream v0.12.2's `initial_admin_keys` authorization
+  path. Doctor warns established deployments to clear the value declaratively.
+
 ## [0.1.3] - 2026-08-27
 
 ### Changed
