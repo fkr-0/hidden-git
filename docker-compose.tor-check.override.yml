@@ -11,6 +11,7 @@ services:
         condition: service_started
     environment:
       ONION_PUBLIC_PORT: ${ONION_PUBLIC_PORT}
+      ONION_SSH_PORT: ${ONION_SSH_PORT}
       SOFT_SERVE_SSH_USER: ${SOFT_SERVE_SSH_USER}
       CHECK_TIMEOUT_SECONDS: ${CHECK_TIMEOUT_SECONDS:-180}
     volumes:

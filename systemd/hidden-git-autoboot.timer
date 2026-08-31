@@ -1,0 +1,12 @@
+# Managed by HiddenGit autoboot
+[Unit]
+Description=Periodically reconcile HiddenGit after boot and Docker recovery
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=5min
+AccuracySec=30s
+Unit=hidden-git-autoboot.service
+
+[Install]
+WantedBy=timers.target

@@ -16,7 +16,7 @@ Schema v2 separates operator intent from tracked release/build metadata.
 | `HIDDEN_GIT_CONFIG_VERSION` | schema | `2` | Exact operator config contract understood by this release. |
 | `SOFT_SERVE_NAME` | user intent | `HiddenGit` | Human-facing forge name. |
 | `SOFT_SERVE_INITIAL_ADMIN_KEYS` | bootstrap-only | empty | Public SSH key(s) required to initialize fresh state. On an existing DB HiddenGit suppresses this variable before executing Soft Serve; clear it from `.env` after bootstrap. |
-| `ONION_PUBLIC_PORT` | user intent | `8002` | Port clients address on the onion service. |
+| `ONION_PUBLIC_PORT` | user intent | `8002` | Backward-compatible onion SSH virtual port. Mandatory port `2022` is exposed on the same identity independently; equal values collapse to one mapping. |
 | `LOCAL_SSH_PORT` | user intent | `23231` | Host port mapped to managed internal SSH `23231`. |
 | `HOST_BIND_ADDRESS` | advanced override | `127.0.0.1` | Host binding for local SSH publication. Wider binding expands attack surface. |
 | `SOFT_SERVE_SSH_PUBLIC_URL` | advanced override | empty | Clone metadata only. Empty derives `ssh://localhost:<LOCAL_SSH_PORT>`; any valid explicit `ssh://` URL is preserved independently of routing ports. |
@@ -41,6 +41,7 @@ release/build inputs:
 - `ALPINE_IMAGE`
 - `GO_IMAGE`
 - `SOFT_SERVE_VERSION`
+- `ONION_SSH_PORT` (`2022`, mandatory same-identity onion SSH policy)
 - `TRIVY_IMAGE`
 - `BUILDKIT_IMAGE`
 - `DIND_ROOTLESS_IMAGE`

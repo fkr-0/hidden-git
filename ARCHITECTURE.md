@@ -71,7 +71,7 @@ The `tor` container publishes the Soft Serve SSH listener as a Tor v3 hidden ser
 - All Linux capabilities dropped.
 - `no-new-privileges` enabled.
 - Tor state and the onion identity persisted under `data/tor/`.
-- Operator chooses only `ONION_PUBLIC_PORT`; the internal target is the managed constant `soft-serve:23231`.
+- Release policy always exposes virtual SSH port `2022`; `ONION_PUBLIC_PORT` is a compatibility alias when distinct. Both map to the same `soft-serve:23231` endpoint and the same persisted `HiddenServiceDir`/hostname.
 - Starts only after Soft Serve reports healthy.
 - Reports healthy only after control-port bootstrap reaches 100% and the onion hostname exists.
 
@@ -113,11 +113,27 @@ Existing state is never recursively re-owned during normal startup. A stopped, e
 
 ### Git access
 
-1. A client opens SSH to the onion hostname and `ONION_PUBLIC_PORT`.
-2. Tor maps that virtual port to the fixed `soft-serve:23231` SSH endpoint.
+1. A client opens SSH to the onion hostname on mandatory port `2022` (or the configured compatibility port).
+2. Tor maps both virtual ports, when distinct, to the fixed `soft-serve:23231` SSH endpoint from one `HiddenServiceDir`; if both port values are `2022`, the renderer emits exactly one mapping.
 3. Soft Serve authenticates the SSH key and applies forge/repository authorization.
 4. Git protocol data remains inside the Tor circuit until it reaches the HiddenGit host.
 5. Local operator SSH independently maps `HOST_BIND_ADDRESS:LOCAL_SSH_PORT` to the same internal `23231`; it does not alter Tor or Soft Serve topology.
+
+### Host/autoboot recovery
+
+Compose `restart: unless-stopped` handles ordinary process/daemon recovery while
+containers still exist, but deliberately remembers an explicit stop. The
+supported host-boot authority is an optional systemd user timer installed by
+`./run.sh autoboot install` after a qualified running deployment. Installation
+requires login linger so the user manager exists at host boot. The timer runs
+`autoboot reconcile` shortly after boot and every five minutes from the prior
+activation: already-running stacks are a no-op; stopped/missing services are
+restored from existing local images using Compose `--no-build --wait`. A Docker
+outage fails closed and is retried on the next timer activation. HiddenGit does
+not own Docker-engine boot itself; installation records one durable Docker
+context and status/doctor expose later context or managed-unit drift. The
+persistent `data/tor/` bind mount is unchanged, so container recreation does not
+create a second onion identity.
 
 ### Backup
 

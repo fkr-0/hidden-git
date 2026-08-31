@@ -9,6 +9,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Mandatory same-identity onion SSH virtual port `2022`, while preserving a
+  distinct configured `ONION_PUBLIC_PORT` as a compatibility mapping to the same
+  fixed Soft Serve SSH backend; duplicate `2022` declarations converge to one.
+- Systemd user autoboot reconciliation with fail-closed install/status/remove
+  commands and isolated boot, Docker-outage, explicit-stop, and idempotency tests.
 - Configuration schema v2 separates operator/bootstrap/diagnostic/recovery
   intent from tracked non-secret release metadata in `config/release.env`.
 - Loss-aware migration classifies non-default historical HTTP/Git/stats ports
@@ -38,6 +43,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   before Compose or config-dependent mutation; restart validates before down.
 - Soft Serve stats are fully disabled rather than merely container-loopback
   reachable.
+- Explicit-key onion checks now require successful SSH authentication instead of
+  treating `Permission denied` as success; E2E includes a wrong-key negative probe.
+- Autoboot retries use activation-based timer cadence, and status/doctor report
+  stale managed units or Docker-context drift instead of silently retargeting boot recovery.
 
 ### Security
 

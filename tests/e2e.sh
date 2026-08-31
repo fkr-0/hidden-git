@@ -40,10 +40,11 @@ release_value() {
 ALPINE_IMAGE="$(release_value ALPINE_IMAGE)"
 GO_IMAGE="$(release_value GO_IMAGE)"
 SOFT_SERVE_VERSION="$(release_value SOFT_SERVE_VERSION)"
+ONION_SSH_PORT="$(release_value ONION_SSH_PORT)"
 TRIVY_IMAGE="$(release_value TRIVY_IMAGE)"
 BUILDKIT_IMAGE="$(release_value BUILDKIT_IMAGE)"
 DIND_ROOTLESS_IMAGE="$(release_value DIND_ROOTLESS_IMAGE)"
-export ALPINE_IMAGE GO_IMAGE SOFT_SERVE_VERSION TRIVY_IMAGE BUILDKIT_IMAGE DIND_ROOTLESS_IMAGE
+export ALPINE_IMAGE GO_IMAGE SOFT_SERVE_VERSION ONION_SSH_PORT TRIVY_IMAGE BUILDKIT_IMAGE DIND_ROOTLESS_IMAGE
 
 docker compose version >/dev/null 2>&1 || {
     printf 'Docker Compose v2 is required\n' >&2
@@ -114,6 +115,7 @@ trap cleanup EXIT
 
 cp "${ROOT_DIR}/env.example" "$ENV_FILE"
 ssh-keygen -q -t ed25519 -N '' -C hidden-git-e2e -f "${TMP_DIR}/admin_key"
+ssh-keygen -q -t ed25519 -N '' -C hidden-git-e2e-unauthorized -f "${TMP_DIR}/unauthorized_key"
 admin_key="$(cat "${TMP_DIR}/admin_key.pub")"
 
 python3 - "$ENV_FILE" "$admin_key" "$E2E_CHECK_TIMEOUT_SECONDS" <<'PY'
@@ -150,6 +152,7 @@ path.write_text("\n".join(lines) + "\n")
 path.chmod(0o600)
 PY
 chmod 600 "$ENV_FILE" "${TMP_DIR}/admin_key"
+chmod 600 "${TMP_DIR}/unauthorized_key"
 
 cat > "$OVERRIDE_FILE" <<YAML
 services:
@@ -237,17 +240,28 @@ docker run --rm --network "$network_name" "$ALPINE_IMAGE" sh -ec \
     '! nc -z -w 2 soft-serve 23232 && ! nc -z -w 2 soft-serve 9418 && ! nc -z -w 2 soft-serve 23233'
 
 torrc="$(container_exec tor cat /run/hidden-git/torrc)"
+grep -Fq 'HiddenServicePort 2022 soft-serve:23231' <<<"$torrc"
 grep -Fq 'HiddenServicePort 18002 soft-serve:23231' <<<"$torrc"
+[[ "$(grep -c '^HiddenServicePort ' <<<"$torrc")" == 2 ]]
 
 published="$(docker port "$soft_id")"
 [[ "$(wc -l <<<"$published" | tr -d ' ')" == '1' ]]
 grep -Eq "^23231/tcp -> 127\.0\.0\.1:${local_ssh_port}$" <<<"$published"
+[[ -z "$(docker port "$tor_id")" ]] || {
+    printf '%s\n' 'Tor unexpectedly publishes a host port; onion 2022 must remain virtual-only' >&2
+    exit 1
+}
+if grep -Eq '(^|:)2022($|[^0-9])' <<<"$published"; then
+    printf '%s\n' 'mandatory onion virtual port 2022 leaked into host publication' >&2
+    exit 1
+fi
 
 onion_host="$(container_exec tor cat /var/lib/tor/hidden_service/hostname | tr -d '\r\n')"
 [[ "$onion_host" == *.onion ]] || {
     printf 'invalid onion hostname: %s\n' "$onion_host" >&2
     exit 1
 }
+onion_hostname_hash="$(container_exec tor sha256sum /var/lib/tor/hidden_service/hostname | awk '{print $1}')"
 
 local_output="$(ssh \
     -F /dev/null \
@@ -391,9 +405,24 @@ esac
 # mandatory assertion, but allow one bounded fresh-Tor retry rather than turning
 # transient public-network bootstrap into a false product regression.
 "${compose[@]}" --profile check build tor-check >/dev/null
+
+# An explicit identity turns tor-check into an authenticated probe. A wrong key
+# must fail instead of being accepted merely because the SSH handshake reached
+# Soft Serve and returned "Permission denied".
+if "${compose[@]}" --profile check run --rm \
+    -e CHECK_TIMEOUT_SECONDS=4 \
+    -e SSH_ATTEMPT_TIMEOUT_SECONDS=3 \
+    -e SSH_IDENTITY_FILE=/run/secrets/hidden-git-e2e-unauthorized-key \
+    -v "${TMP_DIR}/unauthorized_key:/run/secrets/hidden-git-e2e-unauthorized-key:ro" \
+    tor-check >/dev/null 2>&1; then
+    printf '%s\n' 'tor-check accepted an unauthorized explicit SSH identity' >&2
+    exit 1
+fi
+
 onion_check_ok=0
 for ((attempt = 1; attempt <= E2E_ONION_CHECK_ATTEMPTS; attempt++)); do
-    if "${compose[@]}" --profile check run --rm tor-check; then
+    if "${compose[@]}" --profile check run --rm tor-check \
+        && "${compose[@]}" --profile check run --rm -e ONION_CHECK_PORT=18002 tor-check; then
         onion_check_ok=1
         break
     fi
@@ -411,6 +440,16 @@ done
     exit 1
 }
 
+# A real explicit stop/start recovery through existing local images must preserve
+# the persisted hidden-service identity. This mirrors autoboot reconciliation's
+# Compose recovery primitive without touching the owner's live deployment.
+"${compose[@]}" stop tor soft-serve >/dev/null
+"${compose[@]}" up -d --no-build --wait soft-serve tor
+soft_id="$("${compose[@]}" ps -q soft-serve)"
+tor_id="$("${compose[@]}" ps -q tor)"
+[[ "$onion_hostname_hash" == "$(container_exec tor sha256sum /var/lib/tor/hidden_service/hostname | awk '{print $1}')" ]] \
+    || { printf '%s\n' 'onion hostname bytes changed across explicit stop/start recovery' >&2; exit 1; }
+
 # Recreate both services and verify managed configuration remains authoritative.
 first_config_hash="$(printf '%s' "$managed_config" | sha256sum | awk '{print $1}')"
 "${compose[@]}" up -d --force-recreate --wait soft-serve tor
@@ -419,5 +458,31 @@ tor_id="$("${compose[@]}" ps -q tor)"
 second_config="$(container_exec soft-serve cat /run/hidden-git/soft-serve.config.yaml)"
 [[ "$first_config_hash" == "$(printf '%s' "$second_config" | sha256sum | awk '{print $1}')" ]]
 container_exec soft-serve test -s /var/lib/soft-serve/config.yaml
+[[ "$onion_hostname_hash" == "$(container_exec tor sha256sum /var/lib/tor/hidden_service/hostname | awk '{print $1}')" ]] \
+    || { printf '%s\n' 'onion hostname bytes changed across service recreation' >&2; exit 1; }
 
-printf 'E2E PASS: fixed internal SSH, least-privilege listeners, stale-config override protection, local SSH, and onion SSH (%s)\n' "$onion_host"
+# A configured compatibility port of 2022 must collapse to one Tor declaration,
+# never a duplicate virtual-port mapping. Recreating Tor must still preserve the
+# exact same persisted onion hostname bytes.
+python3 - "$ENV_FILE" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+lines = []
+for line in path.read_text().splitlines():
+    if line.startswith("ONION_PUBLIC_PORT="):
+        line = "ONION_PUBLIC_PORT=2022"
+    lines.append(line)
+path.write_text("\n".join(lines) + "\n")
+path.chmod(0o600)
+PY
+"${compose[@]}" up -d --force-recreate --wait tor
+tor_id="$("${compose[@]}" ps -q tor)"
+deduped_torrc="$(container_exec tor cat /run/hidden-git/torrc)"
+[[ "$(grep -c '^HiddenServicePort ' <<<"$deduped_torrc")" == 1 ]]
+grep -Fxq 'HiddenServicePort 2022 soft-serve:23231' <<<"$deduped_torrc"
+[[ "$onion_hostname_hash" == "$(container_exec tor sha256sum /var/lib/tor/hidden_service/hostname | awk '{print $1}')" ]] \
+    || { printf '%s\n' 'onion hostname bytes changed during duplicate-port convergence' >&2; exit 1; }
+
+printf 'E2E PASS: fixed internal SSH, local SSH, same-identity onion SSH on 2022 + compatibility port, and duplicate-port convergence\n'

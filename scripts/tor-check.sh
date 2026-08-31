@@ -1,14 +1,17 @@
 #!/bin/sh
 set -eu
 
-: "${ONION_PUBLIC_PORT:?ONION_PUBLIC_PORT is required}"
+: "${ONION_SSH_PORT:?ONION_SSH_PORT is required}"
+: "${ONION_CHECK_PORT:=$ONION_SSH_PORT}"
 : "${SOFT_SERVE_SSH_USER:=admin}"
 : "${CHECK_TIMEOUT_SECONDS:=180}"
 : "${SSH_ATTEMPT_TIMEOUT_SECONDS:=20}"
 
-case "$ONION_PUBLIC_PORT" in
-    ''|*[!0-9]*) printf 'invalid ONION_PUBLIC_PORT: %s\n' "$ONION_PUBLIC_PORT" >&2; exit 2 ;;
+case "$ONION_CHECK_PORT" in
+    ''|*[!0-9]*) printf 'invalid ONION_CHECK_PORT: %s\n' "$ONION_CHECK_PORT" >&2; exit 2 ;;
 esac
+[ "$ONION_CHECK_PORT" -ge 1 ] && [ "$ONION_CHECK_PORT" -le 65535 ] \
+    || { printf 'ONION_CHECK_PORT must be between 1 and 65535\n' >&2; exit 2; }
 case "$CHECK_TIMEOUT_SECONDS" in
     ''|*[!0-9]*) printf 'invalid CHECK_TIMEOUT_SECONDS: %s\n' "$CHECK_TIMEOUT_SECONDS" >&2; exit 2 ;;
 esac
@@ -39,12 +42,14 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         -o PasswordAuthentication=no \
         -o StrictHostKeyChecking=accept-new \
         -o "UserKnownHostsFile=$known_hosts"
+    authenticated_check=0
     if [ -n "${SSH_IDENTITY_FILE:-}" ]; then
         [ -r "$SSH_IDENTITY_FILE" ] || { printf 'SSH identity is not readable: %s\n' "$SSH_IDENTITY_FILE" >&2; exit 2; }
         set -- "$@" -i "$SSH_IDENTITY_FILE"
+        authenticated_check=1
     fi
     set -- "$@" \
-        -p "$ONION_PUBLIC_PORT" \
+        -p "$ONION_CHECK_PORT" \
         "$SOFT_SERVE_SSH_USER@$host" help
 
     if last_output="$(timeout --signal=TERM "${SSH_ATTEMPT_TIMEOUT_SECONDS}s" torsocks "$@" 2>&1)"; then
@@ -52,7 +57,13 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         exit 0
     fi
 
-    if printf '%s\n' "$last_output" | grep -Eq 'Permission denied|Connection closed|Soft Serve|Usage:|Available Commands:'; then
+    # Without an explicit identity this command is a reachability probe, so a
+    # completed SSH handshake that reaches Soft Serve can be sufficient. When
+    # a caller supplies SSH_IDENTITY_FILE (notably E2E), require the SSH command
+    # itself to succeed: accepting "Permission denied" would false-pass an
+    # authenticated qualification with the wrong key.
+    if [ "$authenticated_check" -eq 0 ] && \
+        printf '%s\n' "$last_output" | grep -Eq 'Permission denied|Connection closed|Soft Serve|Usage:|Available Commands:'; then
         printf '%s\n' "$last_output"
         exit 0
     fi

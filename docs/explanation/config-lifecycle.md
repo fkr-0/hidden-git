@@ -15,6 +15,7 @@ network/public intent                 immutable image references
 bootstrap key                         Soft Serve v0.12.2
 clone metadata                        release scanner/builder
 checks/recovery recipient             rootless qualification image
+                                       mandatory onion SSH port 2022
        │                                      │
        └──────── scripts/configctl.py ─────────┘
                          │

@@ -29,8 +29,9 @@ The target model is:
 
 ```text
 internal SSH = 23231  ← managed constant
-       ↑          ↑
-       │          └── Tor onion:<ONION_PUBLIC_PORT>
+       ↑          ↑           ↑
+       │          │           └── Tor onion:<ONION_PUBLIC_PORT> (compat, if distinct)
+       │          └────────────── Tor onion:2022 (mandatory)
        └───────────── host 127.0.0.1:<LOCAL_SSH_PORT>
 ```
 
@@ -125,7 +126,10 @@ idempotency.
 ./run.sh status
 ```
 
-Verify local SSH on `LOCAL_SSH_PORT` and onion SSH on `ONION_PUBLIC_PORT`.
+Verify local SSH on `LOCAL_SSH_PORT`, mandatory onion SSH on `2022`, and the
+configured compatibility `ONION_PUBLIC_PORT` when it differs. Reinstall/recheck
+the autoboot timer after moving the checkout because its rendered service unit
+contains the absolute repository path.
 If the deployment already has a DB and still carries a bootstrap admin key,
 `doctor` warns; runtime suppression makes it inert, but clear it declaratively.
 

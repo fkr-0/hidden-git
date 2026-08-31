@@ -9,13 +9,28 @@ VERSION_FILE="${ROOT_DIR}/VERSION"
 CONFIG_SCHEMA="${ROOT_DIR}/config/schema.json"
 RELEASE_FILE="${ROOT_DIR}/config/release.env"
 CONFIG_CTL="${ROOT_DIR}/scripts/configctl.py"
-RELEASE_KEYS=(ALPINE_IMAGE GO_IMAGE SOFT_SERVE_VERSION TRIVY_IMAGE BUILDKIT_IMAGE DIND_ROOTLESS_IMAGE)
+RELEASE_KEYS=(ALPINE_IMAGE GO_IMAGE SOFT_SERVE_VERSION ONION_SSH_PORT TRIVY_IMAGE BUILDKIT_IMAGE DIND_ROOTLESS_IMAGE)
 COMPOSE=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
 COMPOSE_CHECK=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" -f "${COMPOSE_TOR_CHECK_OVERRIDE}")
 COMPOSE_MAINTENANCE=(docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" --profile maintenance)
+AUTOBOOT_SERVICE_NAME='hidden-git-autoboot.service'
+AUTOBOOT_TIMER_NAME='hidden-git-autoboot.timer'
+AUTOBOOT_SERVICE_TEMPLATE="${ROOT_DIR}/systemd/${AUTOBOOT_SERVICE_NAME}.template"
+AUTOBOOT_TIMER_TEMPLATE="${ROOT_DIR}/systemd/${AUTOBOOT_TIMER_NAME}"
+AUTOBOOT_MANAGED_MARKER='# Managed by HiddenGit autoboot'
 
 log() {
     printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
+}
+
+autoboot_docker_context() {
+    [[ -z "${DOCKER_HOST:-}" ]] \
+        || fail 'autoboot cannot persist an ad-hoc DOCKER_HOST; select a durable Docker context (docker context use <name>) and unset DOCKER_HOST first'
+    local context
+    context="$(docker context show 2>/dev/null || true)"
+    [[ "$context" =~ ^[A-Za-z0-9_.-]+$ ]] \
+        || fail 'autoboot requires a named persistent Docker context'
+    printf '%s\n' "$context"
 }
 
 runtime_is_rootless() {
@@ -236,18 +251,20 @@ wait_for_hostname() {
 }
 
 run_tor_ssh_check_task() {
+    local onion_port="$1"
     [[ -f "${COMPOSE_TOR_CHECK_OVERRIDE}" ]] \
         || fail "Tor check override not found at ${COMPOSE_TOR_CHECK_OVERRIDE}"
-    "${COMPOSE_CHECK[@]}" --profile check run --rm --build tor-check
+    "${COMPOSE_CHECK[@]}" --profile check run --rm --build \
+        -e "ONION_CHECK_PORT=${onion_port}" tor-check
 }
 
 is_onion_ssh_connectable() {
     local host="$1"
-    local onion_port ssh_user known_hosts output rc
-    onion_port="$(config_value ONION_PUBLIC_PORT)"
+    local onion_port="$2"
+    local ssh_user known_hosts output rc
     ssh_user="$(config_value SOFT_SERVE_SSH_USER)"
     [[ -n "$ssh_user" ]] || ssh_user="admin"
-    validate_port ONION_PUBLIC_PORT "$onion_port"
+    validate_port ONION_CHECK_PORT "$onion_port"
 
     known_hosts="$(mktemp)"
     set +e
@@ -277,11 +294,12 @@ is_onion_ssh_connectable() {
 
 wait_for_onion_ssh() {
     local host="$1"
-    local timeout_s="${2:-180}"
+    local onion_port="$2"
+    local timeout_s="${3:-180}"
     local elapsed=0
 
     while ((elapsed < timeout_s)); do
-        if is_onion_ssh_connectable "$host"; then
+        if is_onion_ssh_connectable "$host" "$onion_port"; then
             return 0
         fi
         sleep 3
@@ -292,21 +310,29 @@ wait_for_onion_ssh() {
 
 verify_onion_ssh_connectivity() {
     local host="$1"
-    local timeout_s
+    local timeout_s primary_port compat_port port
+    local ports=()
     timeout_s="$(config_value CHECK_TIMEOUT_SECONDS)"
     [[ -n "$timeout_s" ]] || timeout_s=180
+    primary_port="$(release_value ONION_SSH_PORT)"
+    compat_port="$(config_value ONION_PUBLIC_PORT)"
+    validate_port ONION_SSH_PORT "$primary_port"
+    validate_port ONION_PUBLIC_PORT "$compat_port"
 
-    if has_oniux; then
-        log "oniux detected; verifying SSH connectivity through the onion service"
-        if wait_for_onion_ssh "$host" "$timeout_s"; then
-            return 0
+    ports+=("$primary_port")
+    [[ "$compat_port" == "$primary_port" ]] || ports+=("$compat_port")
+    for port in "${ports[@]}"; do
+        if has_oniux; then
+            log "oniux detected; verifying onion SSH on virtual port ${port}"
+            if wait_for_onion_ssh "$host" "$port" "$timeout_s"; then
+                continue
+            fi
+            log "oniux check on port ${port} timed out; retrying through the containerized torsocks checker"
+        else
+            log "oniux not found; using the containerized torsocks checker for onion port ${port}"
         fi
-        log "oniux check timed out; retrying through the containerized torsocks checker"
-    else
-        log "oniux not found; using the containerized torsocks checker"
-    fi
-
-    run_tor_ssh_check_task
+        run_tor_ssh_check_task "$port"
+    done
 }
 
 cmd_init() {
@@ -364,9 +390,10 @@ cmd_status() {
     require_runtime
     validate_environment
     "${COMPOSE[@]}" ps
-    local host onion_port ssh_port ssh_user
+    local host onion_port onion_ssh_port ssh_port ssh_user
     host="$(tor_hostname | tr -d '\r\n')"
     onion_port="$(config_value ONION_PUBLIC_PORT)"
+    onion_ssh_port="$(release_value ONION_SSH_PORT)"
     ssh_port="$(config_value LOCAL_SSH_PORT)"
     ssh_user="$(config_value SOFT_SERVE_SSH_USER)"
     [[ -n "$ssh_user" ]] || ssh_user='admin'
@@ -375,14 +402,17 @@ cmd_status() {
     else
         log "Hidden service hostname not available"
     fi
-    if [[ -n "$onion_port" ]]; then
-        log "Onion public SSH port: ${onion_port}"
+    log "Onion SSH port: ${onion_ssh_port} (mandatory, same persisted identity)"
+    if [[ "$onion_port" == "$onion_ssh_port" ]]; then
+        log "Onion compatibility port coincides with ${onion_ssh_port}; one Tor mapping is emitted"
     else
-        log "Onion public SSH port is not configured"
+        log "Onion compatibility SSH port: ${onion_port} (same persisted identity)"
     fi
     [[ -z "$ssh_port" ]] || log "Local SSH: ssh -p ${ssh_port} ${ssh_user}@127.0.0.1"
-    if [[ -n "$host" && -n "$onion_port" ]]; then
-        log "Onion SSH: oniux ssh -p ${onion_port} ${ssh_user}@${host}"
+    if [[ -n "$host" ]]; then
+        log "Onion SSH: oniux ssh -p ${onion_ssh_port} ${ssh_user}@${host}"
+        [[ "$onion_port" == "$onion_ssh_port" ]] \
+            || log "Compatibility SSH: oniux ssh -p ${onion_port} ${ssh_user}@${host}"
     fi
 }
 
@@ -769,6 +799,249 @@ cmd_restart() {
     cmd_up
 }
 
+autoboot_unit_dir() {
+    if [[ -n "${HIDDEN_GIT_SYSTEMD_USER_DIR:-}" ]]; then
+        printf '%s\n' "$HIDDEN_GIT_SYSTEMD_USER_DIR"
+    else
+        printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+    fi
+}
+
+autoboot_installed_service() {
+    printf '%s/%s\n' "$(autoboot_unit_dir)" "$AUTOBOOT_SERVICE_NAME"
+}
+
+autoboot_installed_timer() {
+    printf '%s/%s\n' "$(autoboot_unit_dir)" "$AUTOBOOT_TIMER_NAME"
+}
+
+autoboot_installed_docker_context() {
+    local service_path context count
+    service_path="$(autoboot_installed_service)"
+    [[ -f "$service_path" ]] || return 1
+    context="$(sed -n 's/^Environment=DOCKER_CONTEXT=//p' "$service_path")"
+    count="$(printf '%s\n' "$context" | sed '/^$/d' | wc -l | tr -d ' ')"
+    [[ "$count" == 1 && "$context" =~ ^[A-Za-z0-9_.-]+$ ]] || return 1
+    printf '%s\n' "$context"
+}
+
+autoboot_require_canonical_env() {
+    [[ "$(realpath -m "$ENV_FILE")" == "$(realpath -m "$ROOT_DIR/.env")" ]] \
+        || fail 'autoboot requires the canonical repository .env; HIDDEN_GIT_ENV_FILE overrides are not boot-stable'
+}
+
+autoboot_services_running() {
+    local running
+    running="$("${COMPOSE[@]}" ps --status running --services 2>/dev/null || true)"
+    grep -Fxq 'soft-serve' <<<"$running" && grep -Fxq 'tor' <<<"$running"
+}
+
+autoboot_runtime_topology_ok() {
+    local primary compat expected_count actual_count
+    primary="$(release_value ONION_SSH_PORT)"
+    compat="$(config_value ONION_PUBLIC_PORT)"
+    expected_count=1
+    [[ "$compat" == "$primary" ]] || expected_count=2
+
+    actual_count="$("${COMPOSE[@]}" exec -T tor sh -ec \
+        "grep -c '^HiddenServicePort ' /run/hidden-git/torrc" 2>/dev/null || true)"
+    [[ "$actual_count" == "$expected_count" ]] || return 1
+    "${COMPOSE[@]}" exec -T tor grep -Fxq \
+        "HiddenServicePort ${primary} soft-serve:23231" /run/hidden-git/torrc \
+        >/dev/null 2>&1 || return 1
+    if [[ "$compat" != "$primary" ]]; then
+        "${COMPOSE[@]}" exec -T tor grep -Fxq \
+            "HiddenServicePort ${compat} soft-serve:23231" /run/hidden-git/torrc \
+            >/dev/null 2>&1 || return 1
+    fi
+}
+
+autoboot_preflight_install() {
+    require_runtime
+    autoboot_require_canonical_env
+    validate_environment
+    "${COMPOSE_CHECK[@]}" --profile check config >/dev/null
+    autoboot_services_running \
+        || fail "autoboot installation requires an already-running qualified stack; run './run.sh up' first"
+    autoboot_runtime_topology_ok \
+        || fail "running Tor does not match the current same-identity SSH topology; run './run.sh up' and re-qualify before enabling autoboot"
+    [[ -n "$(tor_hostname | tr -d '\r\n')" ]] \
+        || fail 'autoboot installation requires an established persisted onion hostname'
+    require_cmd systemctl
+    require_cmd loginctl
+    autoboot_docker_context >/dev/null
+    local linger
+    linger="$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null || true)"
+    [[ "$linger" == yes ]] \
+        || fail "systemd user autoboot requires login linger; enable it explicitly with 'loginctl enable-linger $(id -un)'"
+    [[ -f "$AUTOBOOT_SERVICE_TEMPLATE" && -f "$AUTOBOOT_TIMER_TEMPLATE" ]] \
+        || fail 'autoboot systemd templates are missing from this checkout'
+}
+
+render_autoboot_service_for_context() {
+    local docker_context="$1"
+    python3 - "$AUTOBOOT_SERVICE_TEMPLATE" "$ROOT_DIR" "$docker_context" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+template = Path(sys.argv[1]).read_text(encoding="utf-8")
+root = sys.argv[2]
+docker_context = sys.argv[3]
+if not re.fullmatch(r"/[A-Za-z0-9_./-]+", root):
+    raise SystemExit(
+        "repository path contains characters unsupported by the managed systemd unit; "
+        "use an absolute checkout path containing only letters, digits, _, -, ., and /"
+    )
+if not re.fullmatch(r"[A-Za-z0-9_.-]+", docker_context):
+    raise SystemExit("Docker context name contains unsupported characters")
+print(
+    template.replace("@ROOT_DIR@", root).replace("@DOCKER_CONTEXT@", docker_context),
+    end="",
+)
+PY
+}
+
+render_autoboot_service() {
+    local docker_context
+    docker_context="$(autoboot_docker_context)"
+    render_autoboot_service_for_context "$docker_context"
+}
+
+autoboot_units_current() {
+    local installed_context service_path timer_path
+    installed_context="$(autoboot_installed_docker_context 2>/dev/null || true)"
+    service_path="$(autoboot_installed_service)"
+    timer_path="$(autoboot_installed_timer)"
+    [[ -n "$installed_context" && -f "$service_path" && -f "$timer_path" ]] || return 1
+    cmp -s "$AUTOBOOT_TIMER_TEMPLATE" "$timer_path" || return 1
+    cmp -s <(render_autoboot_service_for_context "$installed_context") "$service_path"
+}
+
+cmd_autoboot_install() {
+    [[ $# -eq 0 ]] || fail 'usage: ./run.sh autoboot install'
+    autoboot_preflight_install
+
+    local unit_dir service_path timer_path tmp_service
+    unit_dir="$(autoboot_unit_dir)"
+    service_path="$(autoboot_installed_service)"
+    timer_path="$(autoboot_installed_timer)"
+    tmp_service="$(mktemp)"
+    if ! render_autoboot_service >"$tmp_service"; then
+        rm -f "$tmp_service"
+        fail 'failed to render the managed autoboot service unit'
+    fi
+
+    if [[ -e "$service_path" && ! -f "$service_path" ]]; then
+        rm -f "$tmp_service"
+        fail "autoboot service path exists but is not a regular file: $service_path"
+    fi
+    if [[ -e "$timer_path" && ! -f "$timer_path" ]]; then
+        rm -f "$tmp_service"
+        fail "autoboot timer path exists but is not a regular file: $timer_path"
+    fi
+    if [[ -f "$service_path" ]] && ! cmp -s "$tmp_service" "$service_path"; then
+        rm -f "$tmp_service"
+        fail "existing $AUTOBOOT_SERVICE_NAME differs from the managed unit; review/remove it explicitly before install"
+    fi
+    if [[ -f "$timer_path" ]] && ! cmp -s "$AUTOBOOT_TIMER_TEMPLATE" "$timer_path"; then
+        rm -f "$tmp_service"
+        fail "existing $AUTOBOOT_TIMER_NAME differs from the managed unit; review/remove it explicitly before install"
+    fi
+
+    [[ -d "$unit_dir" ]] || install -d -m 700 "$unit_dir"
+    if [[ ! -f "$service_path" ]]; then
+        install -m 600 "$tmp_service" "$service_path"
+    fi
+    if [[ ! -f "$timer_path" ]]; then
+        install -m 600 "$AUTOBOOT_TIMER_TEMPLATE" "$timer_path"
+    fi
+    rm -f "$tmp_service"
+    systemctl --user daemon-reload
+    systemctl --user enable --now "$AUTOBOOT_TIMER_NAME"
+    log "Installed user autoboot timer: $AUTOBOOT_TIMER_NAME"
+    log "The timer reconciles stopped/missing services without rebuilding images; disable/remove it before intentional downtime"
+}
+
+cmd_autoboot_status() {
+    [[ $# -eq 0 ]] || fail 'usage: ./run.sh autoboot status'
+    require_cmd systemctl
+    local enabled active installed_context current_context units_current
+    enabled="$(systemctl --user is-enabled "$AUTOBOOT_TIMER_NAME" 2>/dev/null || true)"
+    active="$(systemctl --user is-active "$AUTOBOOT_TIMER_NAME" 2>/dev/null || true)"
+    installed_context="$(autoboot_installed_docker_context 2>/dev/null || true)"
+    current_context=''
+    if command -v docker >/dev/null 2>&1; then
+        current_context="$(docker context show 2>/dev/null || true)"
+    fi
+    if autoboot_units_current; then
+        units_current=yes
+    else
+        units_current=no
+    fi
+    printf 'Autoboot timer enabled: %s\n' "${enabled:-not-installed}"
+    printf 'Autoboot timer active:  %s\n' "${active:-inactive}"
+    printf 'Managed units current:  %s\n' "$units_current"
+    printf 'Recorded Docker context: %s\n' "${installed_context:-not-installed}"
+    printf 'Current Docker context:  %s\n' "${current_context:-unavailable}"
+    if [[ -n "$installed_context" && -n "$current_context" && "$installed_context" != "$current_context" ]]; then
+        printf 'Docker context match:    no (remove/reinstall autoboot after qualifying the intended context)\n'
+    elif [[ -n "$installed_context" && -n "$current_context" ]]; then
+        printf 'Docker context match:    yes\n'
+    fi
+    printf 'Service unit: %s\n' "$(autoboot_installed_service)"
+    printf 'Timer unit:   %s\n' "$(autoboot_installed_timer)"
+}
+
+cmd_autoboot_remove() {
+    [[ $# -eq 0 ]] || fail 'usage: ./run.sh autoboot remove'
+    require_cmd systemctl
+    local service_path timer_path
+    service_path="$(autoboot_installed_service)"
+    timer_path="$(autoboot_installed_timer)"
+    if [[ -f "$service_path" ]] && ! grep -Fxq "$AUTOBOOT_MANAGED_MARKER" "$service_path"; then
+        fail "refusing to remove unmanaged unit: $service_path"
+    fi
+    if [[ -f "$timer_path" ]] && ! grep -Fxq "$AUTOBOOT_MANAGED_MARKER" "$timer_path"; then
+        fail "refusing to remove unmanaged unit: $timer_path"
+    fi
+    systemctl --user disable --now "$AUTOBOOT_TIMER_NAME" >/dev/null 2>&1 || true
+    rm -f "$service_path" "$timer_path"
+    systemctl --user daemon-reload
+    systemctl --user reset-failed "$AUTOBOOT_SERVICE_NAME" "$AUTOBOOT_TIMER_NAME" >/dev/null 2>&1 || true
+    log 'Removed HiddenGit autoboot units; running containers were not stopped'
+}
+
+cmd_autoboot_reconcile() {
+    [[ $# -eq 0 ]] || fail 'usage: ./run.sh autoboot reconcile'
+    require_runtime
+    autoboot_require_canonical_env
+    validate_environment
+    "${COMPOSE_CHECK[@]}" --profile check config >/dev/null
+    if autoboot_services_running; then
+        log 'Autoboot reconciliation: Soft Serve and Tor are already running; no mutation needed'
+        return 0
+    fi
+
+    log 'Autoboot reconciliation: recovering stopped or missing services from existing local images'
+    "${COMPOSE[@]}" up -d --no-build --wait
+    autoboot_services_running \
+        || fail 'autoboot reconciliation completed without both default services running'
+    log 'Autoboot reconciliation: stack recovered and healthy'
+}
+
+cmd_autoboot() {
+    local sub="${1:-status}"
+    shift || true
+    case "$sub" in
+        install) cmd_autoboot_install "$@" ;;
+        status) cmd_autoboot_status "$@" ;;
+        remove) cmd_autoboot_remove "$@" ;;
+        reconcile) cmd_autoboot_reconcile "$@" ;;
+        *) fail 'usage: ./run.sh autoboot <install|status|remove|reconcile>' ;;
+    esac
+}
+
 usage() {
     cat <<USAGE
 HiddenGit $(project_version)
@@ -817,6 +1090,8 @@ Commands:
             Report repository and user metadata from deployment databases
   reconcile-state --confirm-current-authoritative [identity-file]
             Back up both layouts, archive the empty legacy deployment, and migrate current ownership
+  autoboot <install|status|remove|reconcile>
+            Manage the systemd user timer that repairs stopped/missing services after boot or Docker recovery
   restart   Stop and start the stack
   version   Print the project version
   help      Show this help
@@ -849,6 +1124,7 @@ main() {
         legacy-state) cmd_legacy_state ;;
         state-inventory) cmd_state_inventory ;;
         reconcile-state) shift; cmd_reconcile_state "$@" ;;
+        autoboot) shift; cmd_autoboot "$@" ;;
         restart) cmd_restart ;;
         version) project_version ;;
         help|-h|--help) usage ;;

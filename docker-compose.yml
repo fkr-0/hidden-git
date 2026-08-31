@@ -49,6 +49,7 @@ services:
         ALPINE_IMAGE: ${ALPINE_IMAGE}
     environment:
       ONION_PUBLIC_PORT: ${ONION_PUBLIC_PORT}
+      ONION_SSH_PORT: ${ONION_SSH_PORT}
     volumes:
       - ./data/tor:/var/lib/tor
     read_only: true

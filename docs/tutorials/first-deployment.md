@@ -64,8 +64,9 @@ SOFT_SERVE_SSH_PUBLIC_URL=
 ```
 
 `LOCAL_SSH_PORT` controls only the loopback-facing host port. It does not change
-Soft Serve's internal listener. `ONION_PUBLIC_PORT` controls only the virtual
-onion port. Both map to internal SSH `23231`.
+Soft Serve's internal listener. `ONION_PUBLIC_PORT` controls only the optional
+compatibility onion port. HiddenGit also always exposes onion SSH on virtual port
+`2022`; both mappings use the same onion hostname and internal SSH `23231`.
 
 ## 5. Validate before state creation
 
@@ -120,13 +121,13 @@ If `LOCAL_SSH_PORT` was changed, use that host port instead.
 ./run.sh status
 ```
 
-Assume it reports `example.onion` and port `8002`. With `oniux`:
+Assume it reports `example.onion`. Prefer mandatory port `2022` with `oniux`:
 
 ```sshconfig
 Host hiddengit
   HostName example.onion
   User admin
-  Port 8002
+  Port 2022
   ProxyCommand oniux nc %h %p
   IdentityFile ~/.ssh/hiddengit-admin
   IdentitiesOnly yes
@@ -143,7 +144,24 @@ git clone ssh://hiddengit/OWNER/REPOSITORY.git
 The first connection establishes an SSH host-key trust decision. Verify the host
 key through an independent channel when your threat model requires it.
 
-## 9. Create the first backup before real work accumulates
+## 9. Enable host/autoboot recovery
+
+After the first successful start, make the systemd user manager persistent over
+host boots and install HiddenGit's reconciliation timer:
+
+```sh
+loginctl enable-linger "$USER"
+./run.sh autoboot install
+./run.sh autoboot status
+```
+
+The timer does not rebuild images. It only repairs a stopped/missing stack from
+already-qualified local images; healthy services are left untouched. HiddenGit
+does not enable the Docker engine: first ensure the selected Docker context has
+its own boot authority (system Docker, or a lingering rootless Docker user
+service). The installed unit records that context and status reports drift.
+
+## 10. Create the first backup before real work accumulates
 
 Generate an age identity, move it offline, configure only the public recipient,
 then perform a stopped-state backup. Follow the
@@ -154,7 +172,8 @@ as recoverable.
 
 - `config check` passes.
 - `doctor` has no unexplained warning.
-- `status` reports the expected onion port.
+- `status` reports mandatory onion SSH `2022` and any distinct compatibility port.
+- `autoboot status` reports an enabled/active timer when host recovery is desired.
 - local SSH authenticates with the intended key.
 - onion SSH authenticates with the same Soft Serve account.
 - the bootstrap key has been persisted to the intended DB admin account and

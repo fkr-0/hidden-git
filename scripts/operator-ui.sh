@@ -28,6 +28,87 @@ ui_status() {
     esac
 }
 
+audit_autoboot_recovery() {
+    local service_path timer_path enabled='' active='' linger='' running
+    local installed_context='' current_context=''
+    service_path="$(autoboot_installed_service)"
+    timer_path="$(autoboot_installed_timer)"
+    running="$("${COMPOSE[@]}" ps --status running --services 2>/dev/null || true)"
+
+    if command -v systemctl >/dev/null 2>&1; then
+        enabled="$(systemctl --user is-enabled "$AUTOBOOT_TIMER_NAME" 2>/dev/null || true)"
+        active="$(systemctl --user is-active "$AUTOBOOT_TIMER_NAME" 2>/dev/null || true)"
+    fi
+
+    if [[ -z "$running" ]]; then
+        if [[ "$active" == active ]]; then
+            ui_status WARN 'host autoboot recovery' \
+                'services are stopped while the autoboot timer is active and may be restarted automatically' \
+                "run './run.sh autoboot remove' before intentional downtime"
+        else
+            ui_status INFO 'host autoboot recovery' \
+                "services are stopped; install/enable autoboot only after a qualified './run.sh up'"
+        fi
+        return
+    fi
+
+    if [[ ! -f "$service_path" || ! -f "$timer_path" ]]; then
+        ui_status WARN 'host autoboot recovery' \
+            'running deployment has no installed systemd user reconciliation timer' \
+            "after a successful './run.sh up', run './run.sh autoboot install'"
+        return
+    fi
+    if ! autoboot_units_current; then
+        ui_status WARN 'host autoboot recovery' \
+            'installed autoboot units do not match this checkout or their recorded Docker context is invalid' \
+            "review './run.sh autoboot status', then remove/reinstall autoboot after the deployment is qualified"
+        return
+    fi
+    if ! command -v systemctl >/dev/null 2>&1; then
+        ui_status WARN 'host autoboot recovery' \
+            'systemctl is unavailable, so installed autoboot state cannot be verified' \
+            'use a systemd user manager or remove the stale unit files'
+        return
+    fi
+    installed_context="$(autoboot_installed_docker_context 2>/dev/null || true)"
+    current_context="$(docker context show 2>/dev/null || true)"
+    if [[ -z "$current_context" || "$installed_context" != "$current_context" ]]; then
+        ui_status WARN 'host autoboot recovery' \
+            "autoboot targets Docker context ${installed_context:-unknown}, current operator context is ${current_context:-unavailable}" \
+            "qualify the intended context, then remove/reinstall autoboot so runtime and boot authority agree"
+        return
+    fi
+    linger="$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null || true)"
+    if grep -Fxq soft-serve <<<"$running" && grep -Fxq tor <<<"$running" \
+        && [[ "$enabled" == enabled && "$active" == active && "$linger" == yes ]]; then
+        ui_status PASS 'host autoboot recovery' \
+            'systemd user timer is enabled/active and login linger is enabled'
+    else
+        ui_status WARN 'host autoboot recovery' \
+            "runtime/timer state incomplete: enabled=${enabled:-unknown}, active=${active:-unknown}, linger=${linger:-unknown}" \
+            "repair the deployment, then rerun './run.sh autoboot install'"
+    fi
+}
+
+audit_onion_ssh_topology() {
+    local primary compat
+    primary="$(release_value ONION_SSH_PORT)"
+    compat="$(config_value ONION_PUBLIC_PORT)"
+    if [[ "$primary" != 2022 ]]; then
+        ui_status FAIL 'onion SSH policy' \
+            "release-managed primary port is ${primary:-missing}, expected 2022" \
+            'restore the reviewed config/release.env and schema pair'
+        return
+    fi
+    if [[ "$compat" == "$primary" ]]; then
+        ui_status PASS 'onion SSH topology' \
+            'virtual port 2022 is emitted once on the persisted hidden-service identity'
+    else
+        ui_status PASS 'onion SSH topology' \
+            "virtual ports 2022 and ${compat} share the persisted hidden-service identity and backend"
+    fi
+}
+
 audit_legacy_layout() {
     local paths=()
     [[ ! -d "$ROOT_DIR/soft-serve-data" ]] || paths+=(soft-serve-data/)
@@ -220,6 +301,8 @@ run_best_practice_audit() {
     audit_environment_permissions
     audit_runtime_ownership
     audit_host_binding
+    audit_onion_ssh_topology
+    audit_autoboot_recovery
     audit_image_pinning
     audit_admin_key
     audit_legacy_layout

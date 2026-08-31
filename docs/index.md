@@ -15,7 +15,8 @@ independent `.env` switches.
 developer                                       HiddenGit host
 ┌──────────────┐    Tor v3 circuit     ┌─────────────────────────────────┐
 │ git / ssh    │ ────────────────────> │ tor                            │
-│ public key   │                       │  onion:<ONION_PUBLIC_PORT>      │
+│ public key   │                       │  onion:2022 (mandatory SSH)     │
+│              │                       │  onion:<compat> (if distinct)   │
 └──────────────┘                       │          │                      │
                                        │          v                      │
 local operator                         │ soft-serve:23231 (SSH)          │
@@ -38,6 +39,7 @@ local operator                         │ soft-serve:23231 (SSH)          │
 | Build a recovery plan | [Backup and recovery](tutorials/backup-and-recovery/) |
 | Understand every supported setting | [Configuration reference](reference/configuration/) |
 | Understand network exposure | [Networking reference](reference/networking/) |
+| Enable host-boot recovery | [Routine operations](how-to/operations/) |
 | Debug a failed startup | [Troubleshooting](how-to/troubleshooting/) |
 | Change the product or build extensions | [Development](development/) and [Extensions](extensions/) |
 

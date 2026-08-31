@@ -27,6 +27,7 @@
     "ALPINE_IMAGE": {"kind": "release", "type": "image-digest", "required": true},
     "GO_IMAGE": {"kind": "release", "type": "image-digest", "required": true},
     "SOFT_SERVE_VERSION": {"kind": "release", "type": "version-tag", "required": true},
+    "ONION_SSH_PORT": {"kind": "runtime-policy", "type": "const", "value": "2022", "required": true},
     "TRIVY_IMAGE": {"kind": "release", "type": "image-digest", "required": true},
     "BUILDKIT_IMAGE": {"kind": "release", "type": "image-digest", "required": true},
     "DIND_ROOTLESS_IMAGE": {"kind": "release", "type": "image-digest", "required": true}

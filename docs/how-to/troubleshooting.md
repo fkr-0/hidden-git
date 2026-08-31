@@ -63,8 +63,12 @@ Tor health requires control-port-confirmed bootstrap plus a generated onion
 hostname. The managed mapping must be:
 
 ```text
-HiddenServicePort <ONION_PUBLIC_PORT> soft-serve:23231
+HiddenServicePort 2022 soft-serve:23231
+HiddenServicePort <ONION_PUBLIC_PORT> soft-serve:23231  # only when distinct
 ```
+
+Both declarations must live under the same `HiddenServiceDir`. If
+`ONION_PUBLIC_PORT=2022`, exactly one `HiddenServicePort 2022 ...` line is valid.
 
 If Soft Serve is unhealthy, Tor should not be considered ready first.
 
@@ -75,9 +79,40 @@ Check the layers in order:
 1. `./run.sh status` has an onion hostname.
 2. Tor reports 100% bootstrap.
 3. Tor generated target is `soft-serve:23231`.
-4. Client uses the current `ONION_PUBLIC_PORT`.
+4. Client first tests mandatory port `2022`; if needed, test the configured compatibility port too.
 5. `oniux`/torsocks route is functional.
 6. Client identity and Soft Serve account are correct.
+
+## Services stay stopped after boot or Docker restart
+
+`restart: unless-stopped` does not override a prior explicit stop. Check:
+
+```sh
+./run.sh autoboot status
+systemctl --user status hidden-git-autoboot.timer
+```
+
+For host-boot recovery the user manager must have login linger enabled. Repair a
+healthy deployed installation with `./run.sh autoboot install`. The timer does
+not build images; if required images were removed, run the normal reviewed
+`./run.sh up` path first.
+
+The timer is not the Docker engine's boot authority. Verify the Docker daemon or
+rootless Docker user service is itself enabled for boot. `autoboot status` also
+prints the Docker context recorded in the installed service, the currently
+selected context, and whether the managed unit bytes still match this checkout.
+If those contexts differ or the units are stale, qualify the intended context,
+remove autoboot, and reinstall it rather than silently retargeting recovery.
+
+If `autoboot install` reports that the running Tor topology is stale, do not
+force-enable the timer. Re-qualify the deployment with the current source first.
+If it reports a conflicting existing unit, review that unit explicitly;
+HiddenGit intentionally refuses to overwrite or remove foreign systemd units.
+
+If install rejects `DOCKER_HOST`, convert that session-only endpoint to a named
+Docker context and select it with `docker context use <name>`. The managed
+systemd unit persists `DOCKER_CONTEXT`; it intentionally does not copy arbitrary
+interactive-shell environment into boot authority.
 
 ## Onion SSH works, Git operation fails
 

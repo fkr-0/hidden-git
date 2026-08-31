@@ -13,10 +13,11 @@ release_value() {
 ALPINE_IMAGE="$(release_value ALPINE_IMAGE)"
 GO_IMAGE="$(release_value GO_IMAGE)"
 SOFT_SERVE_VERSION="$(release_value SOFT_SERVE_VERSION)"
+ONION_SSH_PORT="$(release_value ONION_SSH_PORT)"
 TRIVY_IMAGE="$(release_value TRIVY_IMAGE)"
 BUILDKIT_IMAGE="$(release_value BUILDKIT_IMAGE)"
 DIND_ROOTLESS_IMAGE="$(release_value DIND_ROOTLESS_IMAGE)"
-export ALPINE_IMAGE GO_IMAGE SOFT_SERVE_VERSION TRIVY_IMAGE BUILDKIT_IMAGE DIND_ROOTLESS_IMAGE
+export ALPINE_IMAGE GO_IMAGE SOFT_SERVE_VERSION ONION_SSH_PORT TRIVY_IMAGE BUILDKIT_IMAGE DIND_ROOTLESS_IMAGE
 DIND_IMAGE="$DIND_ROOTLESS_IMAGE"
 
 cleanup() {
@@ -147,6 +148,18 @@ fi
 DOCKER_HOST="$ROOTLESS_DOCKER_HOST" NO_PROXY=127.0.0.1 \
     docker info --format '{{json .SecurityOptions}}' | grep -q rootless
 
+# The nested daemon is intentionally disposable and starts with an empty image
+# store. Import the already-reviewed base images from the outer daemon so this
+# compatibility test exercises rootless builds/runtime instead of spending its
+# qualification window re-downloading hundreds of MB from public registries.
+for base_image in "$ALPINE_IMAGE" "$GO_IMAGE"; do
+    if ! DOCKER_HOST="$OUTER_DOCKER_HOST" docker image inspect "$base_image" >/dev/null 2>&1; then
+        DOCKER_HOST="$OUTER_DOCKER_HOST" docker pull "$base_image" >/dev/null
+    fi
+    DOCKER_HOST="$OUTER_DOCKER_HOST" docker save "$base_image" \
+        | DOCKER_HOST="$ROOTLESS_DOCKER_HOST" NO_PROXY=127.0.0.1 docker load >/dev/null
+done
+
 export DOCKER_HOST="$ROOTLESS_DOCKER_HOST"
 export NO_PROXY=127.0.0.1
 export HIDDEN_GIT_ENV_FILE="$TMP_DIR/.env"
@@ -163,17 +176,106 @@ soft_id="$("${compose[@]}" ps -q soft-serve)"
 docker inspect --format '{{json .HostConfig.CapDrop}}' "$soft_id" | grep -q ALL
 
 "${compose[@]}" up -d --build tor
-for _ in $(seq 1 30); do
-    tor_id="$("${compose[@]}" ps -q tor)"
-    if [[ -n "$tor_id" && "$(docker inspect --format '{{.State.Running}}' "$tor_id")" == true ]]; then
+tor_uid=''
+for _ in $(seq 1 60); do
+    tor_id="$("${compose[@]}" ps -q tor 2>/dev/null || true)"
+    if [[ -n "$tor_id" ]] && tor_uid="$("${compose[@]}" exec -T tor id -u 2>/dev/null)"; then
         break
     fi
     sleep 1
 done
-[[ "$("${compose[@]}" exec -T tor id -u)" == '10002' ]]
+if [[ "$tor_uid" != '10002' ]]; then
+    printf '%s\n' 'rootless Tor failed to become exec-ready as UID 10002; diagnostics follow' >&2
+    "${compose[@]}" ps >&2 || true
+    "${compose[@]}" logs --no-color --tail=120 tor >&2 || true
+    exit 1
+fi
 tor_id="$("${compose[@]}" ps -q tor)"
-[[ "$(docker inspect --format '{{.HostConfig.ReadonlyRootfs}}' "$tor_id")" == 'true' ]]
-docker inspect --format '{{json .HostConfig.CapDrop}}' "$tor_id" | grep -q ALL
+if [[ "$(docker inspect --format '{{.HostConfig.ReadonlyRootfs}}' "$tor_id")" != 'true' ]]; then
+    printf '%s\n' 'rootless Tor container lost its read-only root filesystem policy' >&2
+    exit 1
+fi
+if ! docker inspect --format '{{json .HostConfig.CapDrop}}' "$tor_id" | grep -q ALL; then
+    printf '%s\n' 'rootless Tor container lost the ALL capability drop policy' >&2
+    exit 1
+fi
+torrc="$("${compose[@]}" exec -T tor cat /run/hidden-git/torrc)"
+if ! grep -Fq 'HiddenServicePort 2022 soft-serve:23231' <<<"$torrc"; then
+    printf '%s\n' 'rootless generated torrc is missing mandatory virtual SSH port 2022' >&2
+    exit 1
+fi
+configured_onion_port="$(python3 "$TMP_DIR/scripts/configctl.py" --env "$TMP_DIR/.env" get ONION_PUBLIC_PORT)"
+if [[ "$configured_onion_port" != 2022 ]]; then
+    if ! grep -Fq "HiddenServicePort ${configured_onion_port} soft-serve:23231" <<<"$torrc"; then
+        printf '%s\n' 'rootless generated torrc is missing the configured compatibility mapping' >&2
+        exit 1
+    fi
+fi
+
+# Restart the disposable rootless Docker daemon itself. Compose's
+# `restart: unless-stopped` policy must recover both services without a manual
+# `compose up`, and the persisted Tor state must keep the exact hostname bytes.
+onion_hostname_hash=''
+for _ in $(seq 1 90); do
+    if "${compose[@]}" exec -T tor sh -ec 'test -s /var/lib/tor/hidden_service/hostname'; then
+        onion_hostname_hash="$("${compose[@]}" exec -T tor sha256sum /var/lib/tor/hidden_service/hostname | awk '{print $1}')"
+        break
+    fi
+    sleep 1
+done
+if [[ ! "$onion_hostname_hash" =~ ^[0-9a-f]{64}$ ]]; then
+    printf '%s\n' 'rootless Tor did not persist an onion hostname before daemon-restart qualification' >&2
+    "${compose[@]}" ps >&2 || true
+    "${compose[@]}" logs --no-color --tail=120 tor >&2 || true
+    exit 1
+fi
+
+DOCKER_HOST="$OUTER_DOCKER_HOST" docker restart "$DAEMON_NAME" >/dev/null
+
+# The outer Docker daemon may allocate a new ephemeral host port when the DIND
+# container is restarted. Re-resolve the disposable endpoint before judging the
+# inner daemon's recovery; probing the stale pre-restart publication would turn
+# a successful Docker restart into a false HiddenGit failure.
+daemon_port="$(DOCKER_HOST="$OUTER_DOCKER_HOST" docker port "$DAEMON_NAME" 2375/tcp | awk -F: 'NR==1{print $NF}')"
+[[ "$daemon_port" =~ ^[0-9]+$ ]]
+ROOTLESS_DOCKER_HOST="tcp://127.0.0.1:${daemon_port}"
+export DOCKER_HOST="$ROOTLESS_DOCKER_HOST"
+
+daemon_ready=0
+for _ in $(seq 1 90); do
+    if DOCKER_HOST="$ROOTLESS_DOCKER_HOST" NO_PROXY=127.0.0.1 docker info >/dev/null 2>&1; then
+        daemon_ready=1
+        break
+    fi
+    sleep 1
+done
+if [[ "$daemon_ready" != 1 ]]; then
+    printf '%s\n' 'rootless Docker daemon did not become ready after outer-container restart; diagnostics follow' >&2
+    DOCKER_HOST="$OUTER_DOCKER_HOST" docker inspect "$DAEMON_NAME" >&2 || true
+    DOCKER_HOST="$OUTER_DOCKER_HOST" docker logs "$DAEMON_NAME" >&2 || true
+    exit 1
+fi
+
+services_recovered=0
+for _ in $(seq 1 60); do
+    running_services="$("${compose[@]}" ps --status running --services 2>/dev/null || true)"
+    if grep -Fxq soft-serve <<<"$running_services" && grep -Fxq tor <<<"$running_services"; then
+        services_recovered=1
+        break
+    fi
+    sleep 1
+done
+if [[ "$services_recovered" != 1 ]]; then
+    printf '%s\n' 'Compose restart policy did not recover both services after rootless daemon restart' >&2
+    "${compose[@]}" ps >&2 || true
+    "${compose[@]}" logs --no-color --tail=120 soft-serve tor >&2 || true
+    exit 1
+fi
+recovered_hostname_hash="$("${compose[@]}" exec -T tor sha256sum /var/lib/tor/hidden_service/hostname | awk '{print $1}')"
+if [[ "$onion_hostname_hash" != "$recovered_hostname_hash" ]]; then
+    printf '%s\n' 'rootless daemon restart changed the persisted onion hostname bytes' >&2
+    exit 1
+fi
 
 "${compose[@]}" down -v
-printf 'PASS: Docker Compose deployment works against a rootless Docker daemon\n'
+printf 'PASS: rootless Docker deployment and daemon-restart recovery preserve the onion identity\n'

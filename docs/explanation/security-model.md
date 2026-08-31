@@ -50,6 +50,11 @@ Stats is disabled entirely; the template's loopback stats address is inert.
 Fewer reachable protocols reduce
 the set of parsers/auth paths that need exposure and independent security review.
 
+The onion surface has one identity and one backend, not one identity per port.
+Tor always exposes SSH virtual port `2022`; a distinct configured compatibility
+port may coexist on that same `HiddenServiceDir`. Neither requires a host TCP
+2022 publication, so the clearnet host listener remains loopback-only.
+
 ## Upstream security cadence
 
 HiddenGit tracks a pinned Soft Serve release and immutable image set in

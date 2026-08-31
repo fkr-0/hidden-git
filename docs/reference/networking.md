@@ -13,7 +13,8 @@ title: Networking reference
 | Soft Serve container | `127.0.0.1:23233` | disabled listener config | inert stats address, not active |
 | Soft Serve container | `127.0.0.1:23232` | disabled listener config | reserved HTTP topology, not active |
 | Soft Serve container | `127.0.0.1:9418` | disabled listener config | native Git daemon, not active |
-| Tor virtual service | `<onion>:ONION_PUBLIC_PORT` | Tor clients | maps to `soft-serve:23231` |
+| Tor virtual service | `<onion>:2022` | Tor clients | mandatory SSH mapping to `soft-serve:23231` |
+| Tor virtual service | `<onion>:ONION_PUBLIC_PORT` | Tor clients | compatibility mapping to the same backend when distinct from `2022` |
 
 ## Data flow
 
@@ -26,7 +27,8 @@ Tor client/proxy
      │ encrypted Tor circuit
      ▼
 HiddenGit tor container
-  HiddenServicePort <public> soft-serve:23231
+  HiddenServicePort 2022 soft-serve:23231
+  HiddenServicePort <compat> soft-serve:23231   # only when distinct
      │ private Compose bridge
      ▼
 Soft Serve SSH :23231
@@ -39,10 +41,11 @@ Soft Serve SSH :23231
 ## Why local and onion ports are separate
 
 `LOCAL_SSH_PORT` answers “which loopback port should Docker publish?”
-`ONION_PUBLIC_PORT` answers “which virtual port should Tor advertise?” Neither
-answers “where should Soft Serve listen?”; that last fact is an implementation
-constant. Separating these domains removes an invariant rather than synchronizing
-two values forever.
+`ONION_PUBLIC_PORT` answers “which historical/operator compatibility port should
+remain reachable?” Release-managed `ONION_SSH_PORT=2022` is always reachable on
+the same onion identity. Neither answers “where should Soft Serve listen?”; that
+last fact is the fixed internal `23231`. No host TCP 2022 publication is needed:
+only Tor receives the virtual-port mapping.
 
 ## Why stats is disabled
 

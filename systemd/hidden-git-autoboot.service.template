@@ -1,0 +1,12 @@
+# Managed by HiddenGit autoboot
+[Unit]
+Description=HiddenGit service reconciliation
+Documentation=file:@ROOT_DIR@/docs/how-to/operations.md
+
+[Service]
+Type=oneshot
+WorkingDirectory=@ROOT_DIR@
+Environment=DOCKER_CONTEXT=@DOCKER_CONTEXT@
+ExecStart=@ROOT_DIR@/run.sh autoboot reconcile
+TimeoutStartSec=10min
+UMask=0077

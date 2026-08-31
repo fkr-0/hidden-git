@@ -66,6 +66,8 @@ for key in ALPINE_IMAGE GO_IMAGE TRIVY_IMAGE BUILDKIT_IMAGE DIND_ROOTLESS_IMAGE;
 done
 [[ "$(python3 scripts/configctl.py release get SOFT_SERVE_VERSION)" == 'v0.12.2' ]] \
     || fail 'Soft Serve release pin changed from reviewed v0.12.2'
+[[ "$(python3 scripts/configctl.py release get ONION_SSH_PORT)" == '2022' ]] \
+    || fail 'release-managed onion SSH port must remain 2022'
 for forbidden_key in SOFT_SERVE_WISH_VERSION SOFT_SERVE_GO_GIT_VERSION \
     SOFT_SERVE_GO_JOSE_VERSION SOFT_SERVE_X_CRYPTO_VERSION SOFT_SERVE_X_NET_VERSION; do
     if grep -R -Fq "$forbidden_key" config/schema.json env.example docker-compose.yml \
@@ -103,8 +105,14 @@ if grep -Eq 'SOFT_SERVE_(SSH|HTTP|STATS|GIT)_PORT|ONION_TARGET_PORT|SOFT_SERVE_D
 fi
 grep -Fq 'nc -w 3 127.0.0.1 23231' scripts/soft-serve-healthcheck.sh \
     || fail 'Soft Serve healthcheck does not target fixed internal SSH 23231'
-grep -Fq "HiddenServicePort \${ONION_PUBLIC_PORT} soft-serve:23231" soft-serve-hidden-service.torrc.template \
-    || fail 'Tor target is not fixed at soft-serve:23231'
+grep -Fq "HiddenServicePort \${ONION_SSH_PORT} soft-serve:23231" soft-serve-hidden-service.torrc.template \
+    || fail 'mandatory onion SSH 2022 mapping is absent from the Tor template'
+grep -Fq "\${ONION_COMPAT_HIDDEN_SERVICE_PORT}" soft-serve-hidden-service.torrc.template \
+    || fail 'Tor template cannot render the backward-compatible onion port'
+grep -Fq "if [ \"\$ONION_PUBLIC_PORT\" != \"\$ONION_SSH_PORT\" ]; then" scripts/tor-entrypoint.sh \
+    || fail 'Tor entrypoint does not de-duplicate coincident virtual ports'
+grep -Fq 'managed Tor virtual-port topology is missing, duplicated, or inconsistent' scripts/tor-entrypoint.sh \
+    || fail 'Tor entrypoint lacks fail-closed exact virtual-port validation'
 grep -A2 '^stats:' soft-serve.config.yaml.template | grep -Fq 'enabled: false' \
     || fail 'Soft Serve stats are not disabled'
 grep -Fq 'listen_addr: "127.0.0.1:23233"' soft-serve.config.yaml.template \
@@ -136,6 +144,10 @@ pass 'build-context and backup secret hygiene'
 
 grep -Fq 'timeout --signal=TERM' scripts/tor-check.sh \
     || fail 'containerized SSH attempts lack a hard timeout'
+grep -Fq 'authenticated_check' scripts/tor-check.sh \
+    || fail 'containerized SSH checker does not distinguish authenticated qualification from reachability'
+grep -Fq 'accepting "Permission denied" would false-pass' scripts/tor-check.sh \
+    || fail 'authenticated onion qualification regression guard is missing'
 grep -Fq 'timeout --signal=TERM' run.sh \
     || fail 'host-side SSH attempts lack a hard timeout'
 pass 'bounded SSH attempts'
@@ -526,8 +538,12 @@ grep -Fq 'actions/deploy-pages' .github/workflows/pages.yml \
     || fail 'Pages workflow does not deploy through the supported Pages action'
 [[ -f .github/dependabot.yml ]] || fail 'Dependabot configuration is missing'
 [[ -x tests/rootless-docker.sh ]] || fail 'rootless Docker integration test is missing or not executable'
+[[ -x tests/autoboot.sh ]] || fail 'autoboot lifecycle test is missing or not executable'
 grep -Fq 'rootless-docker' .github/workflows/ci.yml \
     || fail 'CI does not run the rootless Docker integration test'
 pass 'repository automation manifests'
+
+./tests/autoboot.sh
+pass 'isolated autoboot lifecycle and reconciliation'
 
 printf 'All static release checks passed.\n'

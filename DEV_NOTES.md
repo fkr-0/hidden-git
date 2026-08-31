@@ -29,7 +29,8 @@ operator intent                         implementation policy
 ────────────────────────────────       ───────────────────────────────
 LOCAL_SSH_PORT ───────────────┐
                               ├───────> Soft Serve SSH :23231
-ONION_PUBLIC_PORT ── Tor ─────┘
+ONION_SSH_PORT=2022 ── Tor ───┤
+ONION_PUBLIC_PORT ── Tor ─────┘  (compatibility alias when distinct)
 
 SOFT_SERVE_NAME                         data path /var/lib/soft-serve
 HOST_BIND_ADDRESS                       HTTP disabled
@@ -65,7 +66,9 @@ HiddenGit is SSH-over-Tor, not a generic multi-protocol Soft Serve appliance.
 
 - SSH is enabled on managed `:23231`.
 - Local host publication maps `LOCAL_SSH_PORT` to internal `23231` and defaults to loopback.
-- Tor maps `ONION_PUBLIC_PORT` to `soft-serve:23231`.
+- Tor always maps release-managed virtual port `2022` to `soft-serve:23231` and
+  retains `ONION_PUBLIC_PORT` as a second mapping only when distinct. Both live
+  under the same persisted `HiddenServiceDir`, so there is one onion identity.
 - HTTP is disabled.
 - native `git://` is disabled.
 - LFS and SSH LFS are disabled.
@@ -79,6 +82,17 @@ that user's key into the stale bootstrap field, recreates Soft Serve, and proves
 global `settings`/`user` operations remain unauthorized.
 
 An extension that widens this profile must carry explicit threat-model, migration, documentation, positive socket tests, and negative reachability tests.
+
+Host boot recovery deliberately has two layers. Compose `restart: unless-stopped`
+handles ordinary daemon/process recovery while existing containers remain. A
+systemd user timer, installed only after a qualified running deployment and with
+login linger enabled, repairs the explicit-stop/down gap using
+`docker compose up -d --no-build --wait`. It never chooses a new state path or
+Tor identity. The timer retries from service activation rather than relying on
+deactivation timing, and `Persistent=` is deliberately absent because systemd
+only applies that setting to calendar timers. The installed unit records one
+named Docker context; status/doctor flag later context or unit drift. Docker
+engine boot remains external host policy rather than something HiddenGit enables.
 
 ## Stale config regression
 
