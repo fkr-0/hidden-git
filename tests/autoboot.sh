@@ -46,6 +46,22 @@ if [[ "${1:-}" == context && "${2:-}" == show ]]; then
     printf '%s\n' "${FAKE_DOCKER_CONTEXT:-fixture-context}"
     exit 0
 fi
+if [[ "${1:-}" == inspect ]]; then
+    case "$*" in
+        *"{{.State.Status}}"*)
+            printf 'running\n'
+            exit 0
+            ;;
+        *"{{if .State.Health}}"*)
+            if [[ "$*" == *'fake-soft-id'* ]]; then
+                cat "$FAKE_STATE_DIR/soft-health" 2>/dev/null || printf 'healthy\n'
+            else
+                cat "$FAKE_STATE_DIR/tor-health" 2>/dev/null || printf 'healthy\n'
+            fi
+            exit 0
+            ;;
+    esac
+fi
 if [[ "${1:-}" == compose ]]; then
     shift
     args=" $* "
@@ -54,6 +70,12 @@ if [[ "${1:-}" == compose ]]; then
     fi
     if [[ "$args" == *' ps --status running --services '* ]]; then
         cat "$FAKE_STATE_DIR/services" 2>/dev/null || true
+        exit 0
+    fi
+    if [[ "$args" == *' ps -q soft-serve '* ]]; then
+        if grep -Fxq soft-serve "$FAKE_STATE_DIR/services" 2>/dev/null; then
+            printf 'fake-soft-id\n'
+        fi
         exit 0
     fi
     if [[ "$args" == *' ps -q tor '* ]]; then

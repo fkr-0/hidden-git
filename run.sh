@@ -836,6 +836,21 @@ autoboot_services_running() {
     grep -Fxq 'soft-serve' <<<"$running" && grep -Fxq 'tor' <<<"$running"
 }
 
+autoboot_services_ready() {
+    local service soft_id tor_id status_id status health
+    autoboot_services_running || return 1
+    for service in soft-serve tor; do
+        case "$service" in
+            soft-serve) soft_id="$("${COMPOSE[@]}" ps -q soft-serve 2>/dev/null || true)"; status_id="$soft_id" ;;
+            tor) tor_id="$("${COMPOSE[@]}" ps -q tor 2>/dev/null || true)"; status_id="$tor_id" ;;
+        esac
+        [[ -n "$status_id" ]] || return 1
+        status="$(docker inspect --format '{{.State.Status}}' "$status_id" 2>/dev/null || true)"
+        health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$status_id" 2>/dev/null || true)"
+        [[ "$status" == running && "$health" == healthy ]] || return 1
+    done
+}
+
 autoboot_runtime_topology_ok() {
     local primary compat expected_count actual_count
     primary="$(release_value ONION_SSH_PORT)"
@@ -861,8 +876,8 @@ autoboot_preflight_install() {
     autoboot_require_canonical_env
     validate_environment
     "${COMPOSE_CHECK[@]}" --profile check config >/dev/null
-    autoboot_services_running \
-        || fail "autoboot installation requires an already-running qualified stack; run './run.sh up' first"
+    autoboot_services_ready \
+        || fail "autoboot installation requires an already-running healthy stack; run './run.sh up' first"
     autoboot_runtime_topology_ok \
         || fail "running Tor does not match the current same-identity SSH topology; run './run.sh up' and re-qualify before enabling autoboot"
     [[ -n "$(tor_hostname | tr -d '\r\n')" ]] \
@@ -1018,15 +1033,15 @@ cmd_autoboot_reconcile() {
     autoboot_require_canonical_env
     validate_environment
     "${COMPOSE_CHECK[@]}" --profile check config >/dev/null
-    if autoboot_services_running; then
-        log 'Autoboot reconciliation: Soft Serve and Tor are already running; no mutation needed'
+    if autoboot_services_ready; then
+        log 'Autoboot reconciliation: Soft Serve and Tor are already healthy; no mutation needed'
         return 0
     fi
 
-    log 'Autoboot reconciliation: recovering stopped or missing services from existing local images'
+    log 'Autoboot reconciliation: recovering stopped, missing, or unhealthy services from existing local images'
     "${COMPOSE[@]}" up -d --no-build --wait
-    autoboot_services_running \
-        || fail 'autoboot reconciliation completed without both default services running'
+    autoboot_services_ready \
+        || fail 'autoboot reconciliation completed without both default services healthy'
     log 'Autoboot reconciliation: stack recovered and healthy'
 }
 

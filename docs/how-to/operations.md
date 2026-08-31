@@ -56,9 +56,9 @@ a mismatch is a review/reinstall condition, not an automatic retarget.
 Existing unit files with the same names are never overwritten unless their bytes
 already match HiddenGit's managed units. The timer checks after boot and every
 five minutes from the previous reconciliation activation. It leaves a healthy
-stack untouched and repairs stopped/missing services with existing local images
-(`--no-build --wait`). A Docker-daemon outage therefore fails closed and is
-retried on the next activation.
+stack untouched and repairs stopped, missing, or unhealthy services with existing
+local images (`--no-build --wait`). A Docker-daemon outage therefore fails closed
+and is retried on the next activation.
 
 Before planned downtime, remove the timer first:
 
