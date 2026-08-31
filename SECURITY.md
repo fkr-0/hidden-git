@@ -63,7 +63,9 @@ The default product profile intentionally exposes authenticated SSH only:
 
 - Soft Serve SSH is fixed at internal `:23231`;
 - the host maps loopback `LOCAL_SSH_PORT` to internal `23231`;
-- Tor maps `ONION_PUBLIC_PORT` to `soft-serve:23231`;
+- Tor always maps mandatory virtual SSH port `2022` to `soft-serve:23231` on the
+  persisted hidden-service identity, and maps `ONION_PUBLIC_PORT` to that same
+  backend only when it is distinct;
 - HTTP and native `git://` are disabled;
 - LFS and SSH LFS are disabled;
 - stats is disabled entirely and opens no `23233` socket, including inside the Soft Serve container.
