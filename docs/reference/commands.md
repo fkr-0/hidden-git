@@ -36,7 +36,7 @@ title: Command reference
 | `autoboot install` | user systemd unit/timer | yes | After an already-qualified running stack, install and enable boot/periodic reconciliation; requires login linger. |
 | `autoboot status` | no | no | Read timer enable/active state, managed-unit freshness, installed paths, and recorded/current Docker-context agreement. |
 | `autoboot remove` | user systemd unit/timer | no container mutation | Disable/remove autoboot without stopping HiddenGit containers. |
-| `autoboot reconcile` | containers only when stopped/missing/unhealthy | yes | Validate config, no-op when both services are healthy, otherwise `compose up --no-build --wait`. |
+| `autoboot reconcile` | containers only when stopped/missing/unhealthy | yes | Validate config, no-op when both services are healthy, otherwise recreate the degraded stack with existing images via `compose up --no-build --wait --force-recreate`. |
 | `evidence` | generated evidence/images/cache | yes | Provenance, SBOM and vulnerability policy artifacts. |
 | `issues` | no | no | Print tracked project issue status. |
 | `version` | no | no | Print canonical `VERSION`. |

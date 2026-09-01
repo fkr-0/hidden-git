@@ -105,8 +105,9 @@ if [[ "${1:-}" == compose ]]; then
             exit 0
         fi
     fi
-    if [[ "$args" == *' up -d --no-build --wait '* ]]; then
+    if [[ "$args" == *' up -d --no-build --wait --force-recreate '* ]]; then
         printf 'soft-serve\ntor\n' > "$FAKE_STATE_DIR/services"
+        rm -f "$FAKE_STATE_DIR/soft-health" "$FAKE_STATE_DIR/tor-health"
         exit 0
     fi
 fi
@@ -231,7 +232,7 @@ fi
 # Healthy reconciliation is a no-op: no Compose up occurs.
 : > "$FAKE_STATE/docker.log"
 (cd "$FIXTURE" && ./run.sh autoboot reconcile >/dev/null)
-if grep -Fq 'up -d --no-build --wait' "$FAKE_STATE/docker.log"; then
+if grep -Fq 'up -d --no-build --wait --force-recreate' "$FAKE_STATE/docker.log"; then
     printf '%s\n' 'healthy autoboot reconciliation mutated the stack' >&2
     exit 1
 fi
@@ -242,7 +243,16 @@ fi
 (cd "$FIXTURE" && ./run.sh autoboot reconcile >/dev/null)
 grep -Fxq soft-serve "$FAKE_STATE/services"
 grep -Fxq tor "$FAKE_STATE/services"
-grep -Fq 'up -d --no-build --wait' "$FAKE_STATE/docker.log"
+grep -Fq 'up -d --no-build --wait --force-recreate' "$FAKE_STATE/docker.log"
+
+# Compose does not normally restart an unchanged container just because its
+# healthcheck is failing. Reconciliation must explicitly recreate a degraded
+# stack rather than waiting forever on the same unhealthy container.
+printf 'unhealthy\n' > "$FAKE_STATE/soft-health"
+: > "$FAKE_STATE/docker.log"
+(cd "$FIXTURE" && ./run.sh autoboot reconcile >/dev/null)
+[[ ! -e "$FAKE_STATE/soft-health" ]]
+grep -Fq 'up -d --no-build --wait --force-recreate' "$FAKE_STATE/docker.log"
 
 # A Docker-daemon outage fails without fabricating service state; the next timer
 # attempt after daemon recovery repairs the stack.
@@ -282,4 +292,4 @@ unset FAKE_DOCKER_CONTEXT
 [[ ! -e "$SYSTEMD_DIR/hidden-git-autoboot.timer" ]]
 (cd "$FIXTURE" && ./run.sh autoboot remove >/dev/null)
 
-printf 'PASS: autoboot install/status/remove and boot/Docker/explicit-stop reconciliation are idempotent and fail closed\n'
+printf 'PASS: autoboot install/status/remove and boot/Docker/explicit-stop/unhealthy reconciliation are idempotent and fail closed\n'

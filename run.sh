@@ -1038,8 +1038,14 @@ cmd_autoboot_reconcile() {
         return 0
     fi
 
-    log 'Autoboot reconciliation: recovering stopped, missing, or unhealthy services from existing local images'
-    "${COMPOSE[@]}" up -d --no-build --wait
+    log 'Autoboot reconciliation: recreating degraded services from existing local images'
+    # `docker compose up --wait` does not restart an unchanged container merely
+    # because its healthcheck is failing. Once the stack is known not-ready,
+    # force a container recreation so stopped, missing, and unhealthy states all
+    # converge through the same dependency-aware Compose path without building.
+    # Persistent Soft Serve and Tor state are bind-mounted, so this does not
+    # rotate the onion identity or application state.
+    "${COMPOSE[@]}" up -d --no-build --wait --force-recreate
     autoboot_services_ready \
         || fail 'autoboot reconciliation completed without both default services healthy'
     log 'Autoboot reconciliation: stack recovered and healthy'

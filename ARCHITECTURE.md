@@ -127,9 +127,12 @@ supported host-boot authority is an optional systemd user timer installed by
 `./run.sh autoboot install` after a qualified running deployment. Installation
 requires login linger so the user manager exists at host boot. The timer runs
 `autoboot reconcile` shortly after boot and every five minutes from the prior
-activation: healthy stacks are a no-op; stopped, missing, or unhealthy services
-are restored from existing local images using Compose `--no-build --wait`. A
-Docker outage fails closed and is retried on the next timer activation. HiddenGit does
+activation: healthy stacks are a no-op; a stopped, missing, or unhealthy stack
+is recreated from existing local images using Compose
+`--no-build --wait --force-recreate`. The explicit recreation matters because
+ordinary Compose `up --wait` does not restart an unchanged container solely because
+its healthcheck is failing. A Docker outage fails closed and is retried on the
+next timer activation. HiddenGit does
 not own Docker-engine boot itself; installation records one durable Docker
 context and status/doctor expose later context or managed-unit drift. The
 persistent `data/tor/` bind mount is unchanged, so container recreation does not

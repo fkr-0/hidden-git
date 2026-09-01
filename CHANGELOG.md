@@ -45,9 +45,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   reachable.
 - Explicit-key onion checks now require successful SSH authentication instead of
   treating `Permission denied` as success; E2E includes a wrong-key negative probe.
-- Autoboot retries use activation-based timer cadence, reconcile unhealthy as well
-  as stopped/missing services, and status/doctor report stale managed units or
-  Docker-context drift instead of silently retargeting boot recovery.
+- Autoboot retries use activation-based timer cadence, recreate a degraded stack
+  from existing images so unhealthy as well as stopped/missing services actually
+  recover, and status/doctor report stale managed units or Docker-context drift
+  instead of silently retargeting boot recovery.
 
 ### Security
 
