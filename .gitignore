@@ -8,6 +8,7 @@
 data/
 backups/
 release-evidence/
+retired-state/
 __pycache__/
 *.pyc
 soft-serve-data/

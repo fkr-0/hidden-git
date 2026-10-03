@@ -7,5 +7,6 @@ ControlPort 127.0.0.1:9051
 CookieAuthentication 1
 CookieAuthFile /run/hidden-git/control_auth_cookie
 
-# Public onion port -> internal soft-serve SSH endpoint.
-HiddenServicePort ${ONION_PUBLIC_PORT} soft-serve:${ONION_TARGET_PORT}
+# The onion-facing port is operator intent. The target is the fixed HiddenGit
+# internal SSH endpoint; it is deliberately not a second deployment setting.
+HiddenServicePort ${ONION_PUBLIC_PORT} soft-serve:23231

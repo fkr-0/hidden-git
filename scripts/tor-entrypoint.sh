@@ -12,22 +12,26 @@ validate_port() {
     case "$value" in
         ''|*[!0-9]*) fail "$name must be an integer, got: $value" ;;
     esac
-    [ "$value" -ge 1 ] && [ "$value" -le 65535 ] || fail "$name must be between 1 and 65535"
+    if [ "$value" -lt 1 ] || [ "$value" -gt 65535 ]; then
+        fail "$name must be between 1 and 65535"
+    fi
 }
 
 : "${ONION_PUBLIC_PORT:?ONION_PUBLIC_PORT is required}"
-: "${ONION_TARGET_PORT:?ONION_TARGET_PORT is required}"
 validate_port ONION_PUBLIC_PORT "$ONION_PUBLIC_PORT"
-validate_port ONION_TARGET_PORT "$ONION_TARGET_PORT"
 
 umask 077
 mkdir -p /var/lib/tor/hidden_service /run/hidden-git
-# The literal variable allow-list is intentionally passed to envsubst.
+# The Tor target is intentionally fixed in the managed template. Only the
+# onion-facing virtual port remains an operator choice.
 # shellcheck disable=SC2016
-envsubst '${ONION_PUBLIC_PORT} ${ONION_TARGET_PORT}' \
+envsubst '${ONION_PUBLIC_PORT}' \
     < /etc/tor/torrc.template \
     > /run/hidden-git/torrc
 
+# Fail closed if a future template edit reintroduces an unexpected target.
+grep -Fq "HiddenServicePort ${ONION_PUBLIC_PORT} soft-serve:23231" /run/hidden-git/torrc \
+    || fail "managed Tor target is missing or inconsistent"
+
 tor --verify-config -f /run/hidden-git/torrc
 exec tor -f /run/hidden-git/torrc
-

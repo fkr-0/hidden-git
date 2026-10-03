@@ -4,62 +4,50 @@ log:
   format: "text"
   time_format: "2006-01-02 15:04:05"
 
+# HiddenGit owns the internal network topology. Operator-facing host/onion ports
+# are mapped to this stable SSH listener rather than changing the listener itself.
 ssh:
   enabled: true
-  listen_addr: ":${SOFT_SERVE_SSH_PORT}"
+  listen_addr: ":23231"
   public_url: "${SOFT_SERVE_SSH_PUBLIC_URL}"
-  key_path: "${SOFT_SERVE_DATA_PATH}/ssh/soft_serve_host_ed25519"
-  client_key_path: "${SOFT_SERVE_DATA_PATH}/ssh/soft_serve_client_ed25519"
+  key_path: "/var/lib/soft-serve/ssh/soft_serve_host_ed25519"
+  client_key_path: "/var/lib/soft-serve/ssh/soft_serve_client_ed25519"
   max_timeout: 0
   idle_timeout: 600
 
+# The unauthenticated native git:// daemon is outside HiddenGit's Tor+SSH product
+# contract and is disabled by default.
 git:
-  enabled: true
-  listen_addr: ":${SOFT_SERVE_GIT_PORT}"
-  public_url: "${SOFT_SERVE_GIT_PUBLIC_URL}"
+  enabled: false
+  listen_addr: "127.0.0.1:9418"
+  public_url: ""
   max_timeout: 0
   idle_timeout: 3
   max_connections: 32
 
+# The default HiddenGit profile is SSH-only. HTTP can be reintroduced only by a
+# reviewed product change or explicit Compose/config override with a threat model.
 http:
-  enabled: true
-  listen_addr: ":${SOFT_SERVE_HTTP_PORT}"
+  enabled: false
+  listen_addr: "127.0.0.1:23232"
   tls_key_path: ""
   tls_cert_path: ""
-  public_url: "${SOFT_SERVE_HTTP_PUBLIC_URL}"
-  cors:
-    allowed_headers:
-      - "Accept"
-      - "Accept-Language"
-      - "Content-Language"
-      - "Content-Type"
-      - "Origin"
-      - "X-Requested-With"
-      - "User-Agent"
-      - "Authorization"
-      - "Access-Control-Request-Method"
-      - "Access-Control-Allow-Origin"
-    allowed_origins:
-      - "${SOFT_SERVE_HTTP_PUBLIC_URL}"
-    allowed_methods:
-      - "GET"
-      - "HEAD"
-      - "POST"
-      - "PUT"
-      - "OPTIONS"
+  public_url: ""
 
+# Keep process statistics available only inside the Soft Serve container.
 stats:
   enabled: true
-  listen_addr: ":${SOFT_SERVE_STATS_PORT}"
+  listen_addr: "127.0.0.1:23233"
 
 db:
   driver: "sqlite"
-  data_source: "${SOFT_SERVE_DATA_PATH}/soft-serve.db?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
+  data_source: "/var/lib/soft-serve/soft-serve.db?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
 
+# LFS is disabled in the SSH-only profile. It is not silently exposed through an
+# HTTP listener, and SSH LFS remains off unless a future reviewed design enables it.
 lfs:
-  enabled: true
+  enabled: false
   ssh_enabled: false
 
 jobs:
   mirror_pull: "@every 10m"
-
