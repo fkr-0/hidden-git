@@ -58,6 +58,16 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   administration through upstream v0.12.2's `initial_admin_keys` authorization
   path. Doctor warns established deployments to clear the value declaratively.
 
+## [0.1.4] - 2026-10-22
+
+### Fixed
+
+- Bootstrap the repository labels required by Dependabot (`dependencies`,
+  `docker`, and `ci`) and keep them present with a push-triggered,
+  idempotent GitHub Actions check. Existing labels are left unchanged.
+- Add a Docker-free regression test for label creation, repeat runs, and
+  re-creating a deleted label.
+
 ## [0.1.3] - 2026-08-27
 
 ### Changed
