@@ -65,6 +65,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Permission-only configuration migration tightens the existing file to mode
   0600 without creating an unnecessary backup of unchanged bytes.
 - Include Bash in the Soft Serve runtime image for generated Git hooks.
+- Use an explicit port-range branch in the Tor checker for compatibility with
+  ShellCheck 0.9 on GitHub-hosted CI runners.
 - Bootstrap the repository labels required by Dependabot (`dependencies`,
   `docker`, and `ci`) and keep them present with a push-triggered,
   idempotent GitHub Actions check. Existing labels are left unchanged.
