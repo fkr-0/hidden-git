@@ -10,8 +10,10 @@ set -eu
 case "$ONION_CHECK_PORT" in
     ''|*[!0-9]*) printf 'invalid ONION_CHECK_PORT: %s\n' "$ONION_CHECK_PORT" >&2; exit 2 ;;
 esac
-[ "$ONION_CHECK_PORT" -ge 1 ] && [ "$ONION_CHECK_PORT" -le 65535 ] \
-    || { printf 'ONION_CHECK_PORT must be between 1 and 65535\n' >&2; exit 2; }
+if [ "$ONION_CHECK_PORT" -lt 1 ] || [ "$ONION_CHECK_PORT" -gt 65535 ]; then
+    printf 'ONION_CHECK_PORT must be between 1 and 65535\n' >&2
+    exit 2
+fi
 case "$CHECK_TIMEOUT_SECONDS" in
     ''|*[!0-9]*) printf 'invalid CHECK_TIMEOUT_SECONDS: %s\n' "$CHECK_TIMEOUT_SECONDS" >&2; exit 2 ;;
 esac
