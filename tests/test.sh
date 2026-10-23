@@ -80,6 +80,8 @@ if grep -Eq '^[[:space:]]*go get([[:space:]\\]|$)' Dockerfile.soft-serve; then
 fi
 grep -Fq 'go mod verify' Dockerfile.soft-serve \
     || fail 'Soft Serve build no longer verifies the upstream module graph'
+grep -Eq 'apk add --no-cache .*bash([[:space:]]|&&|$)' Dockerfile.soft-serve \
+    || fail 'Soft Serve runtime image must include bash for generated Git hooks'
 for dockerfile in Dockerfile.soft-serve Dockerfile.tor Dockerfile.tor-check Dockerfile.maintenance; do
     if grep -Eq '^ARG (ALPINE_IMAGE|GO_IMAGE)=.+sha256:' "$dockerfile"; then
         fail "$dockerfile duplicates tracked release pins instead of requiring config/release.env build args"
@@ -127,6 +129,12 @@ grep -Fq 'ssh_enabled: false' soft-serve.config.yaml.template \
     || fail 'Git LFS over SSH is not disabled'
 grep -Fq '/run/hidden-git/soft-serve.config.yaml' scripts/soft-serve-entrypoint.sh \
     || fail 'entrypoint does not select managed runtime config'
+grep -Fq 'yaml_single_quote_escape' scripts/soft-serve-entrypoint.sh \
+    || fail 'entrypoint does not YAML-escape operator presentation values'
+grep -Fq "name: '\${SOFT_SERVE_NAME_YAML}'" soft-serve.config.yaml.template \
+    || fail 'Soft Serve name is not rendered as an escaped YAML scalar'
+grep -Fq "public_url: '\${SOFT_SERVE_SSH_PUBLIC_URL_YAML}'" soft-serve.config.yaml.template \
+    || fail 'Soft Serve public SSH URL is not rendered as an escaped YAML scalar'
 grep -Fq "if [ -e \"\$SOFT_SERVE_DATA_PATH/soft-serve.db\" ]; then" scripts/soft-serve-entrypoint.sh \
     || fail 'bootstrap suppression does not treat every existing DB path as established state'
 grep -Fq 'unset SOFT_SERVE_INITIAL_ADMIN_KEYS' scripts/soft-serve-entrypoint.sh \
@@ -210,6 +218,94 @@ configctl "$config_fixture/current-v2.env" migrate --apply \
 [[ "$current_hash" == "$(sha256sum "$config_fixture/current-v2.env" | awk '{print $1}')" ]] \
     || fail 'current v2 no-op changed bytes'
 [[ "$(find "$config_fixture" -name 'current-v2.env.pre-config-*' | wc -l)" == 0 ]]
+
+# 1b. current v2 with only an unsafe mode -> repair permissions in place.
+# Bytes already are their own rollback, so no rollback artifact is warranted.
+cp env.example "$config_fixture/mode-only.env"
+chmod 0644 "$config_fixture/mode-only.env"
+mode_only_hash="$(sha256sum "$config_fixture/mode-only.env" | awk '{print $1}')"
+configctl "$config_fixture/mode-only.env" migrate --apply --json \
+    > "$config_fixture/mode-only-plan.json"
+[[ "$mode_only_hash" == "$(sha256sum "$config_fixture/mode-only.env" | awk '{print $1}')" ]] \
+    || fail 'mode-only migration changed canonical bytes'
+[[ "$(stat -c '%a' "$config_fixture/mode-only.env")" == 600 ]] \
+    || fail 'mode-only migration did not restrict permissions to 0600'
+[[ "$(find "$config_fixture" -name 'mode-only.env.pre-config-*' | wc -l)" == 0 ]] \
+    || fail 'mode-only migration created an unnecessary rollback copy'
+python3 - "$config_fixture/mode-only-plan.json" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+plan = json.loads(Path(sys.argv[1]).read_text())
+assert plan["state"] == "CURRENT"
+assert plan["content_changed"] is False
+assert plan["mode_changed"] is True
+assert plan["applied"] is True
+assert plan["backup"] is None
+PY
+
+# 1c. Compose and configctl must not assign different semantics to accepted v2 text.
+cp env.example "$config_fixture/quoted-current.env"
+python3 - "$config_fixture/quoted-current.env" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+lines = []
+for line in path.read_text().splitlines():
+    if line.startswith("SOFT_SERVE_NAME="):
+        line = 'SOFT_SERVE_NAME="Forge \\"quoted\\" # equals=kept"'
+    lines.append(line)
+path.write_text("\n".join(lines) + "\n")
+path.chmod(0o600)
+PY
+configctl "$config_fixture/quoted-current.env" check >/dev/null
+
+cp env.example "$config_fixture/compose-dollar.env"
+python3 - "$config_fixture/compose-dollar.env" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text().replace("SOFT_SERVE_NAME=HiddenGit", 'SOFT_SERVE_NAME="Forge $HOME"')
+path.write_text(text)
+path.chmod(0o600)
+PY
+if configctl "$config_fixture/compose-dollar.env" check >/dev/null 2>&1; then
+    fail 'Compose-interpolated dollar reference passed canonical config validation'
+fi
+
+cp env.example "$config_fixture/compose-control-escape.env"
+python3 - "$config_fixture/compose-control-escape.env" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text().replace("SOFT_SERVE_NAME=HiddenGit", r'SOFT_SERVE_NAME="Forge\nLine2"')
+path.write_text(text)
+path.chmod(0o600)
+PY
+if configctl "$config_fixture/compose-control-escape.env" check >/dev/null 2>&1; then
+    fail 'Compose control escape passed canonical config validation'
+fi
+
+cp env.example "$config_fixture/malformed-public-url.env"
+python3 - "$config_fixture/malformed-public-url.env" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text().replace(
+    "SOFT_SERVE_SSH_PUBLIC_URL=",
+    r'SOFT_SERVE_SSH_PUBLIC_URL="ssh://public.example.invalid:2200/path\\"quoted"',
+)
+path.write_text(text)
+path.chmod(0o600)
+PY
+if configctl "$config_fixture/malformed-public-url.env" check >/dev/null 2>&1; then
+    fail 'malformed SSH public URL containing a quote passed validation'
+fi
 
 # 2. current v1 -> v2 ownership migration; also proves release overrides are historical-only.
 cat > "$config_fixture/v1.env" <<'EOF'
@@ -444,7 +540,7 @@ configctl "$config_fixture/sentinel-migrate.env" migrate --apply >/dev/null
 sentinel_after="$(find "$sentinel" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')"
 [[ "$sentinel_before" == "$sentinel_after" ]] \
     || fail 'configuration migration changed sentinel runtime-state bytes'
-pass '18 representative schema-v2 migration fixtures'
+pass '23 representative schema-v2 migration fixtures'
 
 # Release metadata itself gets duplicate/unknown rejection through the same parser.
 cp config/release.env "$config_fixture/release-duplicate.env"

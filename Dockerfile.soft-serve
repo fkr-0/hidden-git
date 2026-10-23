@@ -18,7 +18,7 @@ RUN set -eux; \
 FROM ${ALPINE_IMAGE}
 
 RUN apk upgrade --no-cache && \
-    apk add --no-cache ca-certificates gettext-envsubst git tini && \
+    apk add --no-cache bash ca-certificates gettext-envsubst git tini && \
     addgroup -g 10001 -S hidden-git && \
     adduser -u 10001 -S -D -H -h /var/lib/soft-serve -s /sbin/nologin -G hidden-git hidden-git && \
     install -d -o 10001 -g 10001 -m 0700 /var/lib/soft-serve /run/hidden-git

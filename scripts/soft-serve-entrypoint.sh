@@ -17,6 +17,12 @@ validate_port() {
     fi
 }
 
+yaml_single_quote_escape() {
+    # YAML single-quoted scalars preserve backslashes, #, =, and double quotes.
+    # A literal apostrophe is represented by two apostrophes.
+    printf '%s' "$1" | sed "s/'/''/g"
+}
+
 SOFT_SERVE_DATA_PATH=/var/lib/soft-serve
 SOFT_SERVE_INTERNAL_SSH_PORT=23231
 : "${SOFT_SERVE_NAME:=HiddenGit}"
@@ -44,11 +50,18 @@ fi
 
 export SOFT_SERVE_NAME SOFT_SERVE_SSH_PUBLIC_URL
 
+# Never substitute raw operator text into a YAML quoted scalar. configctl rejects
+# Compose interpolation/control-escape ambiguity first; this final encoding then
+# preserves every accepted presentation character exactly in managed YAML.
+SOFT_SERVE_NAME_YAML="$(yaml_single_quote_escape "$SOFT_SERVE_NAME")"
+SOFT_SERVE_SSH_PUBLIC_URL_YAML="$(yaml_single_quote_escape "$SOFT_SERVE_SSH_PUBLIC_URL")"
+export SOFT_SERVE_NAME_YAML SOFT_SERVE_SSH_PUBLIC_URL_YAML
+
 config_path=/run/hidden-git/soft-serve.config.yaml
 # Only product-level presentation values are substituted. Listener addresses,
 # persistence paths, service enablement, and the Tor target are managed constants.
 # shellcheck disable=SC2016
-envsubst '${SOFT_SERVE_NAME} ${SOFT_SERVE_SSH_PUBLIC_URL}' \
+envsubst '${SOFT_SERVE_NAME_YAML} ${SOFT_SERVE_SSH_PUBLIC_URL_YAML}' \
     < /etc/hidden-git/soft-serve.config.yaml.template \
     > "$config_path"
 export SOFT_SERVE_CONFIG_LOCATION="$config_path"

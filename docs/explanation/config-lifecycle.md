@@ -109,8 +109,10 @@ v0.12.2 directly and verifies its module graph rather than mutating it with
 Legacy migration renders canonical order/comments from `env.example`; it does
 not preserve historical comments/order. After a successful apply:
 
-- a mode-0600 rollback copy exists in the same directory;
-- replacement is same-directory atomic and fsynced;
+- when configuration bytes change, a mode-0600 rollback copy exists in the same
+  directory and replacement is same-directory atomic and fsynced;
+- a permission-only repair to mode 0600 changes no bytes and creates no rollback
+  copy, because the original configuration bytes remain in place;
 - application state is untouched;
 - applying again writes nothing;
 - file bytes remain identical;

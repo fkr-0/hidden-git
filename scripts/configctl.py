@@ -58,6 +58,11 @@ def split_value(raw: str, *, line_no: int) -> str:
         closing = None
         for index, char in enumerate(value[1:], start=1):
             if quote == '"' and escaped:
+                if char not in {'"', "\\"}:
+                    raise ConfigError(
+                        f"line {line_no}: unsupported double-quoted escape \\{char}; "
+                        "use single quotes for literal backslashes"
+                    )
                 chars.append(char)
                 escaped = False
                 continue
@@ -162,6 +167,10 @@ def validate_typed_value(
             )
     elif type_name == "optional-ssh-url":
         if value:
+            if any(ch.isspace() or ch in {'"', "\\"} for ch in value):
+                errors.append(
+                    f"{key} must not contain whitespace, double quotes, or backslashes"
+                )
             try:
                 parsed = urlparse(value)
                 port = parsed.port
@@ -181,7 +190,11 @@ def validate_current(values: dict[str, str], schema: dict[str, Any]) -> list[str
     errors: list[str] = []
     specs: dict[str, dict[str, Any]] = schema["keys"]
     legacy: dict[str, dict[str, Any]] = schema["legacy_keys"]
-    for key in values:
+    for key, value in values.items():
+        if "$" in value:
+            errors.append(
+                f"{key} must not contain '$'; Docker Compose interpolates dollar references"
+            )
         if key in legacy and key not in specs:
             errors.append(f"legacy key {key} requires migration")
         elif key not in specs:
@@ -589,12 +602,12 @@ def cmd_migrate(args: argparse.Namespace) -> int:
             return 2
 
         if args.apply and plan["changed"]:
-            backup = make_backup(args.env)
             if content_changed:
+                backup = make_backup(args.env)
                 atomic_write(args.env, rendered)
+                plan["backup"] = str(backup)
             os.chmod(args.env, 0o600)
             fsync_directory(args.env.parent)
-            plan["backup"] = str(backup)
             plan["applied"] = True
 
         if args.json:

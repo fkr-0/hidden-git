@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-10-23
+
 ### Added
 
 - Mandatory same-identity onion SSH virtual port `2022`, while preserving a
@@ -23,6 +25,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Isolated E2E coverage for bootstrap-key suppression after database creation,
   explicit clone-metadata divergence, closed stats from every container scope,
   and low-privilege denial of global Soft Serve administration.
+- Native SSH Git push/fetch/clone and persisted-repository recreation tests,
+  plus an optional schema-v1-to-v2 live-upgrade and rollback E2E lane that
+  checks unchanged Soft Serve and Tor state.
+- Governed ws-bridge project workflow with transactional path claims and
+  independent-review policy.
 
 ### Changed
 
@@ -36,6 +43,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   reconciliation no longer persists an identity path into `.env`.
 - Qualification scratch uses caller `$TMPDIR`/`mktemp` rather than fixed global
   temporary paths.
+- Operator config parsing rejects Compose-interpolated dollar values and
+  ambiguous double-quoted escapes; use single quotes for literal backslashes
+  or escape them as `\\\\` inside double quotes.
 
 ### Fixed
 
@@ -49,6 +59,17 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   from existing images so unhealthy as well as stopped/missing services actually
   recover, and status/doctor report stale managed units or Docker-context drift
   instead of silently retargeting boot recovery.
+- Managed Soft Serve YAML escapes literal apostrophes, quotes, backslashes,
+  hashes, and equals signs in forge names and public SSH metadata; reject
+  malformed clone URLs before invoking Compose.
+- Permission-only configuration migration tightens the existing file to mode
+  0600 without creating an unnecessary backup of unchanged bytes.
+- Include Bash in the Soft Serve runtime image for generated Git hooks.
+- Bootstrap the repository labels required by Dependabot (`dependencies`,
+  `docker`, and `ci`) and keep them present with a push-triggered,
+  idempotent GitHub Actions check. Existing labels are left unchanged.
+- Add a Docker-free regression test for label creation, repeat runs, and
+  re-creating a deleted label.
 
 ### Security
 
@@ -57,16 +78,6 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   exec, preventing a stale/changed bootstrap key from regaining global server
   administration through upstream v0.12.2's `initial_admin_keys` authorization
   path. Doctor warns established deployments to clear the value declaratively.
-
-## [0.1.4] - 2026-10-22
-
-### Fixed
-
-- Bootstrap the repository labels required by Dependabot (`dependencies`,
-  `docker`, and `ci`) and keep them present with a push-triggered,
-  idempotent GitHub Actions check. Existing labels are left unchanged.
-- Add a Docker-free regression test for label creation, repeat runs, and
-  re-creating a deleted label.
 
 ## [0.1.3] - 2026-08-27
 

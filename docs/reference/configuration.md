@@ -9,6 +9,23 @@ The public operator configuration contract is versioned by
 release as [`assets/config-schema.json`](../../assets/config-schema.json).
 Schema v2 separates operator intent from tracked release/build metadata.
 
+## Value syntax and parser boundary
+
+`scripts/configctl.py` validates the operator file before Docker Compose is
+allowed to consume it. Quoted `#` and `=` characters remain literal, and an
+unquoted `#` begins an inline comment only after whitespace. To prevent Docker
+Compose from assigning a second meaning to already-validated text, current
+operator values containing `$` are rejected instead of being interpolated.
+Double-quoted values support only `\"` and `\\` escapes; write a literal
+control-like sequence such as `\n` by escaping its backslash (`\\n`) or by
+using single quotes where suitable. `SOFT_SERVE_SSH_PUBLIC_URL` additionally
+rejects whitespace, double quotes, and backslashes.
+
+These restrictions are intentionally fail-closed: `./run.sh config check`
+reports them before any container is started. Accepted presentation values such
+as forge names are YAML-escaped by the Soft Serve entrypoint before being placed
+in the generated managed configuration.
+
 ## Deployment and bootstrap fields
 
 | Key | Class | Default | Meaning |
@@ -121,9 +138,12 @@ Migration recognizes old release pins, `HIDDEN_GIT_VERSION`, historical
 
 Legacy migration renders canonical ordering and comments from `env.example`.
 Semantic values are preserved according to migration policy, but original
-ordering/comments are intentionally not preserved. A successful first apply
-creates a mode-0600 same-directory rollback copy, fsyncs, and atomically replaces
-the config. An immediate second apply is byte-identical and creates no backup.
+ordering/comments are intentionally not preserved. An apply that rewrites
+configuration bytes creates a mode-0600 same-directory rollback copy, fsyncs,
+and atomically replaces the config. If only overly broad file permissions need
+repair, migration restricts the existing file to mode 0600 without creating a
+redundant byte rollback. An immediate second apply is byte-identical and creates
+no backup.
 
 ## Why public URL is not forced to equal a listener
 

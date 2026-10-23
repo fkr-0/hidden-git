@@ -90,14 +90,17 @@ The acknowledgement cannot bypass any other invalid/unsupported migration state.
 ./run.sh config migrate --apply
 ```
 
-If a change is needed, the command first creates a timestamped mode-0600 copy:
+If configuration bytes need to change, the command first creates a timestamped
+mode-0600 copy:
 
 ```text
 .env.pre-config-YYYYmmddTHHMMSSZ
 ```
 
-The replacement is written atomically and fsynced. No rollback copy is created
-when the file is already canonical.
+The replacement is written atomically and fsynced. If the bytes are already
+canonical but the file mode is too broad, migration restricts the existing file
+to mode `0600` without creating a redundant byte rollback. No rollback copy is
+created when neither bytes nor permissions need repair.
 
 ## 5. Prove convergence
 

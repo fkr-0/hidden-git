@@ -1,4 +1,4 @@
-name: "${SOFT_SERVE_NAME}"
+name: '${SOFT_SERVE_NAME_YAML}'
 
 log:
   format: "text"
@@ -9,7 +9,7 @@ log:
 ssh:
   enabled: true
   listen_addr: ":23231"
-  public_url: "${SOFT_SERVE_SSH_PUBLIC_URL}"
+  public_url: '${SOFT_SERVE_SSH_PUBLIC_URL_YAML}'
   key_path: "/var/lib/soft-serve/ssh/soft_serve_host_ed25519"
   client_key_path: "/var/lib/soft-serve/ssh/soft_serve_client_ed25519"
   max_timeout: 0
