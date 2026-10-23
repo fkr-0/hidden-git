@@ -64,8 +64,10 @@ for key in ALPINE_IMAGE GO_IMAGE TRIVY_IMAGE BUILDKIT_IMAGE DIND_ROOTLESS_IMAGE;
     [[ "$value" =~ @sha256:[0-9a-f]{64}$ ]] \
         || fail "$key is not digest-pinned in config/release.env"
 done
-[[ "$(python3 scripts/configctl.py release get SOFT_SERVE_VERSION)" == 'v0.12.2' ]] \
-    || fail 'Soft Serve release pin changed from reviewed v0.12.2'
+[[ "$(python3 scripts/configctl.py release get SOFT_SERVE_VERSION)" == 'v0.12.3' ]] \
+    || fail 'Soft Serve release pin changed from reviewed v0.12.3'
+[[ "$(python3 scripts/configctl.py release get SOFT_SERVE_NET_SECURITY_VERSION)" == 'v0.60.0' ]] \
+    || fail 'the reviewed x/net security uplift must remain pinned to v0.60.0'
 [[ "$(python3 scripts/configctl.py release get ONION_SSH_PORT)" == '2022' ]] \
     || fail 'release-managed onion SSH port must remain 2022'
 for forbidden_key in SOFT_SERVE_WISH_VERSION SOFT_SERVE_GO_GIT_VERSION \
@@ -80,6 +82,8 @@ if grep -Eq '^[[:space:]]*go get([[:space:]\\]|$)' Dockerfile.soft-serve; then
 fi
 grep -Fq 'go mod verify' Dockerfile.soft-serve \
     || fail 'Soft Serve build no longer verifies the upstream module graph'
+grep -Fq "go mod edit -require=golang.org/x/net@\${SOFT_SERVE_NET_SECURITY_VERSION}" Dockerfile.soft-serve \
+    || fail 'Soft Serve security uplift is not source-owned by release metadata'
 grep -Eq 'apk add --no-cache .*bash([[:space:]]|&&|$)' Dockerfile.soft-serve \
     || fail 'Soft Serve runtime image must include bash for generated Git hooks'
 for dockerfile in Dockerfile.soft-serve Dockerfile.tor Dockerfile.tor-check Dockerfile.maintenance; do

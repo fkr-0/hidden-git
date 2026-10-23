@@ -3,6 +3,9 @@ ARG ALPINE_IMAGE
 
 FROM ${GO_IMAGE} AS builder
 ARG SOFT_SERVE_VERSION
+ARG SOFT_SERVE_NET_SECURITY_VERSION
+# Upstream v0.12.3 still selects x/net v0.57.0 (CVE-2026-78669).
+# Apply one tracked, temporary security uplift after verifying upstream.
 RUN set -eux; \
     export GOMODCACHE=/tmp/gomodcache; \
     mkdir -p /src /out; \
@@ -10,6 +13,10 @@ RUN set -eux; \
     cp -a "${GOMODCACHE}/github.com/charmbracelet/soft-serve@${SOFT_SERVE_VERSION}/." /src/; \
     chmod -R u+w /src; \
     cd /src; \
+    go mod verify; \
+    go mod edit -require=golang.org/x/net@${SOFT_SERVE_NET_SECURITY_VERSION}; \
+    go mod tidy; \
+    test "$(go list -m -f '{{.Version}}' golang.org/x/net)" = "${SOFT_SERVE_NET_SECURITY_VERSION}"; \
     go mod verify; \
     CGO_ENABLED=0 go build -trimpath \
       -ldflags "-s -w -X main.Version=${SOFT_SERVE_VERSION}" \

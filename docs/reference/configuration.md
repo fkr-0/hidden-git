@@ -58,12 +58,14 @@ release/build inputs:
 - `ALPINE_IMAGE`
 - `GO_IMAGE`
 - `SOFT_SERVE_VERSION`
+- `SOFT_SERVE_NET_SECURITY_VERSION`
 - `ONION_SSH_PORT` (`2022`, mandatory same-identity onion SSH policy)
 - `TRIVY_IMAGE`
 - `BUILDKIT_IMAGE`
 - `DIND_ROOTLESS_IMAGE`
 
-Image references are immutable digest pins and Soft Serve remains `v0.12.2`.
+Image references are immutable digest pins and Soft Serve uses `v0.12.3` with
+Go `1.26.10`. The temporary `golang.org/x/net` security uplift is `v0.60.0`.
 `scripts/configctl.py` validates and reads this file through the same parser
 boundary as operator config. A current `.env` containing any release-owned key is
 invalid; operator values cannot override the tracked release.
@@ -72,8 +74,10 @@ invalid; operator values cannot override the tracked release.
 `HIDDEN_GIT_VERSION` in schema v2.
 
 The five historical downstream Soft Serve dependency override variables are
-removed. The Dockerfile builds the reviewed upstream v0.12.2 `go.mod`/`go.sum`
-graph directly and runs `go mod verify`.
+removed. The Dockerfile verifies upstream v0.12.3 `go.mod`/`go.sum`,
+applies the one source-owned `x/net` security uplift, then verifies the
+resulting module graph. Remove this temporary uplift once upstream includes
+the patched module without it.
 
 ## Managed internal constants
 

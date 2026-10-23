@@ -37,8 +37,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   HiddenGit project-version authority and `sync-pins` is now non-mutating
   compatibility validation.
 - The five v0.12.2-aligned downstream Go dependency overrides and their
-  Compose/Dockerfile plumbing are removed; Soft Serve builds the reviewed
-  upstream v0.12.2 module graph directly with module verification.
+  Compose/Dockerfile plumbing are removed. Soft Serve v0.12.3 builds with
+  upstream module verification plus a single tracked security uplift.
 - Backup verification/restore require explicit recovery identity paths, and
   reconciliation no longer persists an identity path into `.env`.
 - Qualification scratch uses caller `$TMPDIR`/`mktemp` rather than fixed global
@@ -46,6 +46,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Operator config parsing rejects Compose-interpolated dollar values and
   ambiguous double-quoted escapes; use single quotes for literal backslashes
   or escape them as `\\\\` inside double quotes.
+- Upgrade to Soft Serve v0.12.3 and Go 1.26.10, with one source-owned
+  `golang.org/x/net` v0.60.0 security uplift pending a patched upstream graph.
 
 ### Fixed
 

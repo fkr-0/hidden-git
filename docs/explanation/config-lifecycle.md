@@ -100,9 +100,9 @@ tracked release file and writes no `.env` bytes. Changing release pins is a
 source-review operation, not an operator mutation.
 
 The five historical downstream Soft Serve dependency overrides were removed
-because they matched the selected v0.12.2 graph. The Dockerfile builds upstream
-v0.12.2 directly and verifies its module graph rather than mutating it with
-`go get`.
+because they matched the selected v0.12.2 graph. The Dockerfile now verifies
+upstream v0.12.3, applies one tracked security uplift for its still-vulnerable
+`golang.org/x/net` dependency, and verifies the resulting module graph.
 
 ## Serializer and idempotency
 
