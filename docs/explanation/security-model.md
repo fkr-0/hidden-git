@@ -58,8 +58,9 @@ port may coexist on that same `HiddenServiceDir`. Neither requires a host TCP
 ## Upstream security cadence
 
 HiddenGit tracks a pinned Soft Serve release and immutable image set in
-`config/release.env`. It builds the reviewed upstream Soft Serve module graph
-directly; a dependency override is not considered a substitute for application-level fixes.
+`config/release.env`. It verifies the reviewed upstream Soft Serve module
+graph and applies one pinned, temporary `golang.org/x/net` security uplift.
+This narrow dependency repair is not a substitute for application-level fixes.
 The release process therefore checks current upstream security releases and
 regenerates strict vulnerability evidence before tagging.
 

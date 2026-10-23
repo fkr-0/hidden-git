@@ -135,15 +135,17 @@ release/build metadata is tracked separately in =config/release.env=:
 
 - =ALPINE_IMAGE= :: Minimal runtime base for every release image, digest pinned.
 - =GO_IMAGE= :: Go builder image, digest pinned.
-- =SOFT_SERVE_VERSION= :: Reviewed upstream release, currently =v0.12.2=.
+- =SOFT_SERVE_VERSION= :: Reviewed upstream release, currently =v0.12.3=.
+- =SOFT_SERVE_NET_SECURITY_VERSION= :: Pinned temporary Go x/net security uplift, currently =v0.60.0=.
 - =ONION_SSH_PORT= :: Release-managed mandatory onion SSH virtual port, fixed at =2022=.
 - =TRIVY_IMAGE= :: Digest-pinned release scanner.
 - =BUILDKIT_IMAGE= :: Digest-pinned provenance builder.
 - =DIND_ROOTLESS_IMAGE= :: Digest-pinned rootless qualification daemon.
 
 The operator =.env= cannot override these values. HiddenGit builds the reviewed
-upstream Soft Serve v0.12.2 module graph directly and verifies it with =go mod
-verify=; there are no downstream Go dependency override knobs in schema v2.
+upstream Soft Serve v0.12.3 and verifies its original module graph with =go mod
+verify=, then applies one tracked security uplift for =golang.org/x/net= and
+verifies the resulting graph. Historical override knobs remain retired.
 
 ** Service identity and access
 

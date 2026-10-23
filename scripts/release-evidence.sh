@@ -34,6 +34,7 @@ python3 "$CONFIG_CTL" --schema "$CONFIG_SCHEMA" --release-file "$RELEASE_FILE" \
 ALPINE_IMAGE="$(release_value ALPINE_IMAGE)"
 GO_IMAGE="$(release_value GO_IMAGE)"
 SOFT_SERVE_VERSION="$(release_value SOFT_SERVE_VERSION)"
+SOFT_SERVE_NET_SECURITY_VERSION="$(release_value SOFT_SERVE_NET_SECURITY_VERSION)"
 TRIVY_IMAGE="$(release_value TRIVY_IMAGE)"
 BUILDKIT_IMAGE="$(release_value BUILDKIT_IMAGE)"
 for value in "$ALPINE_IMAGE" "$GO_IMAGE" "$TRIVY_IMAGE" "$BUILDKIT_IMAGE"; do
@@ -108,6 +109,7 @@ for target in $TARGETS; do
             dockerfile='Dockerfile.soft-serve'
             build_args+=(--build-arg "GO_IMAGE=$GO_IMAGE")
             build_args+=(--build-arg "SOFT_SERVE_VERSION=$SOFT_SERVE_VERSION")
+            build_args+=(--build-arg "SOFT_SERVE_NET_SECURITY_VERSION=$SOFT_SERVE_NET_SECURITY_VERSION")
             ;;
         tor) dockerfile='Dockerfile.tor' ;;
         tor-check) dockerfile='Dockerfile.tor-check' ;;
